@@ -8,5 +8,5 @@ fn version_flag_prints_package_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("oc 0.1.0\n"));
+        .stdout(predicate::str::contains("oc 0.1.1\n"));
 }
