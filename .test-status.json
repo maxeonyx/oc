@@ -2,6 +2,10 @@
   "$schema": "https://tdd-ratchet.maxeonyx.com/schema/test-status.v1.json",
   "tests": {
     "oc::gatekeeper$tdd_ratchet_gatekeeper": "passing",
+    "oc::harness_foundation$test_env_cleans_up_stale_tmux_sessions_before_use": "pending",
+    "oc::harness_foundation$test_env_drop_cleans_up_tmux_sessions": "pending",
+    "oc::harness_foundation$test_env_injects_runtime_overrides_into_oc": "pending",
+    "oc::harness_foundation$wait_for_file_contains_observes_eventual_file_content": "pending",
     "oc::version_smoke$version_flag_prints_package_version": "passing"
   }
 }
