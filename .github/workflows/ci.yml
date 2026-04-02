@@ -55,7 +55,7 @@ jobs:
         run: cargo install cargo-nextest@0.9.114 --locked
 
       - name: Install tdd-ratchet
-        run: cargo install --git https://github.com/maxeonyx/tdd-ratchet-rs --rev 60af84544d95e3c64db73fd1770ef6b8ab55b4f8 --locked tdd-ratchet
+        run: cargo install --git https://github.com/maxeonyx/tdd-ratchet-rs --rev 3b9aec65458d2c038c34f4dc441a1e26e0700c97 --locked tdd-ratchet
 
       - name: Check formatting
         run: cargo fmt --check
