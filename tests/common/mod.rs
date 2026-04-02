@@ -132,7 +132,10 @@ pub fn list_tmux_sessions_with_prefix(prefix: &str) -> Vec<String> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        if stderr.contains("no server running") {
+        if stderr.contains("no server running")
+            || (stderr.contains("error connecting to")
+                && stderr.contains("No such file or directory"))
+        {
             return Vec::new();
         }
 
