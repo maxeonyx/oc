@@ -27,30 +27,23 @@ jobs:
           fetch-depth: 0
 
       - name: Enforce version bump on new main commits
+        run: python scripts/check-version-bump.py
+
+      - name: Read Rust toolchain channel
+        id: rust-toolchain
         run: |
-          tag="$(python - <<'PY'
+          python - <<'PY' >> "$GITHUB_OUTPUT"
           import tomllib
 
-          with open("Cargo.toml", "rb") as cargo_toml:
-              version = tomllib.load(cargo_toml)["package"]["version"]
+          with open("rust-toolchain.toml", "rb") as toolchain_toml:
+              channel = tomllib.load(toolchain_toml)["toolchain"]["channel"]
 
-          print(f"v{version}")
+          print(f"channel={channel}")
           PY
-          )"
 
-          if git rev-parse --verify --quiet "${tag}^{commit}" >/dev/null; then
-            tag_commit="$(git rev-parse "${tag}^{commit}")"
-            head_commit="$(git rev-parse HEAD)"
-
-            if [ "$tag_commit" != "$head_commit" ]; then
-              echo "Cargo.toml version ${tag#v} already has git tag $tag at $tag_commit, but HEAD is $head_commit."
-              echo "Bump package.version before pushing new main commits so each release stays tied to one commit."
-              exit 1
-            fi
-          fi
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
@@ -113,8 +106,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Read Rust toolchain channel
+        id: rust-toolchain
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+
+          with open("rust-toolchain.toml", "rb") as toolchain_toml:
+              channel = tomllib.load(toolchain_toml)["toolchain"]["channel"]
+
+          print(f"channel={channel}")
+          PY
+
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
           targets: ${{ matrix.target }}
 
       - name: Install cross-compilation tools
