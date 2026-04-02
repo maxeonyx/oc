@@ -25,9 +25,9 @@ TDD is enforced via `cargo ratchet` (the `tdd-ratchet` crate). CI runs `cargo ra
 
 ## CI & release
 
-Single `.github/workflows/ci.yml` with 4 chained jobs: Check → Build → Release + Pages. Auto-releases on every push to main (no manual tagging). Version-bump enforcement — every push must bump the version in Cargo.toml.
+Single `.github/workflows/ci.yml` with 4 chained jobs: Check → Build → Release + Pages. Auto-releases on every push to main (no manual tagging).
 
-The check job installs `tmux`, `cargo-nextest`, and runs `cargo ratchet` (never `cargo test` directly).
+The repo pins Rust via `rust-toolchain.toml`; CI should use that same toolchain. The check job installs `tmux`, `cargo-nextest`, and runs `cargo ratchet` (never `cargo test` directly).
 
 ## Git identity
 
