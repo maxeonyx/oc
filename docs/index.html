@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>oc</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8f5;
+      --bg-elev: #fcfcfa;
+      --fg: #1b211d;
+      --muted: #5a655f;
+      --border: #d7ddd5;
+      --code-bg: #edf2eb;
+      --key: #b8322a;
+      --str: #2d7d46;
+      --cmd: #0f5f9a;
+      --comment: #6d7872;
+      --accent: #0f766e;
+      --shadow: 0 10px 30px -24px rgba(14, 26, 20, 0.3);
+      --radius: 10px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101512;
+        --bg-elev: #131b17;
+        --fg: #dfe8e2;
+        --muted: #9aa8a1;
+        --border: #2a3831;
+        --code-bg: #17211c;
+        --key: #ff8f86;
+        --str: #95dba7;
+        --cmd: #8cc7ff;
+        --comment: #819089;
+        --accent: #5eead4;
+        --shadow: 0 14px 38px -26px rgba(0, 0, 0, 0.6);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+      min-height: 100vh;
+      background-image: radial-gradient(circle at 15% -10%, color-mix(in srgb, var(--accent) 12%, transparent) 0%, transparent 45%);
+    }
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 4rem 2rem;
+    }
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.5rem;
+    }
+    h2 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin-top: 3rem;
+      margin-bottom: 1rem;
+    }
+    .tagline {
+      color: var(--muted);
+      font-size: 1.1rem;
+      margin-bottom: 3rem;
+    }
+    .demo {
+      background: var(--code-bg);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: 1rem 1.25rem;
+      font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.85rem;
+      margin-bottom: 3rem;
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.45;
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--accent) 45%, var(--border)) transparent;
+    }
+    .demo::-webkit-scrollbar { height: 8px; }
+    .demo::-webkit-scrollbar-track { background: transparent; }
+    .demo::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--accent) 45%, var(--border));
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    .prompt { color: var(--cmd); font-weight: 500; }
+    .selected { color: var(--accent); font-weight: 600; }
+    .commands {
+      display: grid;
+      gap: 1.5rem;
+      margin-bottom: 3rem;
+    }
+    .command {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      background: var(--bg-elev);
+      box-shadow: var(--shadow);
+    }
+    .command code {
+      font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.9rem;
+      background: var(--code-bg);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+    }
+    .command p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+    .codeblock {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.85rem;
+      margin-bottom: 1.5rem;
+      white-space: pre;
+      position: relative;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--accent) 45%, var(--border)) transparent;
+    }
+    .codeblock::-webkit-scrollbar { height: 8px; }
+    .codeblock::-webkit-scrollbar-track { background: transparent; }
+    .codeblock::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--accent) 45%, var(--border));
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    .codeblock-wide {
+      width: min(max(100%, 78vw), 1100px);
+      position: relative;
+      left: 50%;
+      transform: translateX(-50%);
+      border-radius: var(--radius);
+    }
+    @media (max-width: 860px) {
+      .codeblock-wide {
+        width: 100%;
+        left: 0;
+        transform: none;
+      }
+    }
+    .comment { color: var(--comment); }
+    .cmd { color: var(--cmd); font-weight: 500; }
+    .str { color: var(--str); }
+    .copy-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      background: color-mix(in srgb, var(--accent) 18%, var(--border));
+      border: none;
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      color: var(--fg);
+      opacity: 0.8;
+      transition: opacity 0.15s;
+    }
+    .copy-btn:hover { opacity: 1; }
+    .note {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+    }
+    .note a, footer a { color: var(--fg); }
+    footer {
+      color: var(--muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+      padding-top: 2rem;
+      margin-top: 2rem;
+    }
+    footer a {
+      text-decoration: none;
+    }
+    footer a:hover { text-decoration: underline; }
+    .ecosystem { margin-top: 0.6rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>oc</h1>
+    <p class="tagline">Interactive TUI session manager for OpenCode. Keep long-running agent sessions alive in tmux and jump back instantly.</p>
+
+    <div class="demo"><span class="prompt">$ oc</span>
+
+┌ OpenCode sessions ─────────────────────────────────────────────┐
+│ attached 2   detached 3   saved 5                             │
+├────────────────────────────────────────────────────────────────┤
+│ <span class="selected">dc-main</span>      attached   ~/dc-main                         │
+│ oc-rewrite   detached   ~/oc-tui                          │
+│ ticker       saved      ~/ticker-main                     │
+│ New session                                               │
+└────────────────────────────────────────────────────────────────┘
+
+<span class="selected">Action:</span> Attach</div>
+
+    <div class="commands">
+      <div class="command">
+        <code>oc</code>
+        <p>Open the dashboard, see every session state at a glance, and jump with arrow keys plus Enter.</p>
+      </div>
+      <div class="command">
+        <code>oc dc</code>
+        <p>Skip the dashboard when you already know the session name and just want to attach or launch it.</p>
+      </div>
+      <div class="command">
+        <code>oc alias dc ~/dc-main -- --model gpt-5.4</code>
+        <p>Save a named OpenCode session, its directory, and launch arguments for instant re-entry later.</p>
+      </div>
+    </div>
+
+    <h2>Install</h2>
+    <div class="codeblock codeblock-wide" id="install-block"><span class="comment"># Linux x86_64</span>
+<span class="cmd">curl</span> -Lo ~/.local/bin/oc <span class="str">https://oc.maxeonyx.com/releases/oc-x86_64-linux</span>
+<span class="cmd">chmod</span> +x ~/.local/bin/oc<button class="copy-btn" onclick="copyInstall()">Copy</button></div>
+
+    <p class="note">Repo: <a href="https://github.com/maxeonyx/oc">github.com/maxeonyx/oc</a><br>Site: <a href="https://oc.maxeonyx.com">oc.maxeonyx.com</a></p>
+
+    <h2>Agent Skill</h2>
+    <p class="note">For <a href="https://opencode.ai">OpenCode</a> and compatible agents.</p>
+
+    <div class="codeblock" id="skill-install-block"><span class="cmd">mkdir</span> -p ~/.config/opencode/skills/oc
+<span class="cmd">curl</span> -sLo ~/.config/opencode/skills/oc/SKILL.md \
+     <span class="str">https://oc.maxeonyx.com/SKILL.md</span><button class="copy-btn" onclick="copySkillInstall()">Copy</button></div>
+
+    <div class="codeblock"><span class="comment"># Start or reattach from the current repo</span>
+<span class="cmd">oc</span>
+
+<span class="comment"># Jump straight to a known session</span>
+<span class="cmd">oc</span> dc
+
+<span class="comment"># Save an alias for future launches</span>
+<span class="cmd">oc</span> alias dc ~/dc-main</div>
+
+    <footer>
+      <a href="https://github.com/maxeonyx/oc">GitHub</a> | <a href="https://oc.maxeonyx.com">Website</a>
+      <p class="ecosystem">Part of <a href="https://tools.maxeonyx.com">maxeonyx agent-tools</a>: <a href="https://trunc.maxeonyx.com">trunc</a> | <a href="https://tmux-bridge.maxeonyx.com">tb</a> | <a href="https://dotsync.maxeonyx.com">dotsync</a> | <a href="https://tdd-ratchet.maxeonyx.com">tdd-ratchet</a></p>
+    </footer>
+  </div>
+
+  <script>
+    function copyInstall() {
+      const text = `curl -Lo ~/.local/bin/oc https://oc.maxeonyx.com/releases/oc-x86_64-linux
+chmod +x ~/.local/bin/oc`;
+      navigator.clipboard.writeText(text);
+      event.target.textContent = 'Copied!';
+      setTimeout(() => event.target.textContent = 'Copy', 1500);
+    }
+
+    function copySkillInstall() {
+      const text = `mkdir -p ~/.config/opencode/skills/oc
+curl -sLo ~/.config/opencode/skills/oc/SKILL.md \
+     https://oc.maxeonyx.com/SKILL.md`;
+      navigator.clipboard.writeText(text);
+      event.target.textContent = 'Copied!';
+      setTimeout(() => event.target.textContent = 'Copy', 1500);
+    }
+  </script>
+</body>
+</html>

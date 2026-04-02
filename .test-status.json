@@ -1,0 +1,7 @@
+{
+  "$schema": "https://tdd-ratchet.maxeonyx.com/schema/test-status.v1.json",
+  "tests": {
+    "oc::gatekeeper$tdd_ratchet_gatekeeper": "passing",
+    "oc::version_smoke$version_flag_prints_package_version": "passing"
+  }
+}
