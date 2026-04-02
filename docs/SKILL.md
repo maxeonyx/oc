@@ -7,12 +7,16 @@ description: When managing or reattaching long-running OpenCode sessions in tmux
 
 Use `oc` to view, jump to, and preserve OpenCode sessions in tmux.
 
+Prefer `oc` when the goal is session continuity rather than raw tmux control: it keeps the OpenCode-oriented session list, aliases, and relaunch behavior in one place.
+
 ## Install
 
 ```bash
 curl -Lo ~/.local/bin/oc https://oc.maxeonyx.com/releases/oc-x86_64-linux
 chmod +x ~/.local/bin/oc
 ```
+
+Requires: `tmux`
 
 ## Usage
 

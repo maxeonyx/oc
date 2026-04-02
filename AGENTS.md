@@ -17,9 +17,9 @@ See [VISION.md](VISION.md) for the full product vision and stakeholder stories.
 
 ## Testing
 
-Tests are black-box E2E — spawn the `oc` binary, interact with real tmux sessions, assert on outcomes. Never import application internals in tests.
+Tests should stay black-box E2E — spawn the `oc` binary, interact through its public CLI surface, and assert on outcomes. Never import application internals in tests.
 
-Shared test helpers live in `tests/common/mod.rs`. Use polling-based assertions (never fixed sleeps). Test sessions use unique names and auto-cleanup on Drop.
+Shared test helpers live in `tests/common/mod.rs`. Expand that module toward polling-based real-tmux helpers as session-management behavior is implemented; avoid fixed sleeps.
 
 TDD is enforced via `cargo ratchet` (the `tdd-ratchet` crate). CI runs `cargo ratchet` instead of `cargo test` directly.
 

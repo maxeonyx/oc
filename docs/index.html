@@ -156,6 +156,7 @@
     .comment { color: var(--comment); }
     .cmd { color: var(--cmd); font-weight: 500; }
     .str { color: var(--str); }
+    .key { color: var(--key); font-weight: 600; }
     .copy-btn {
       position: absolute;
       top: 0.5rem;
@@ -176,6 +177,28 @@
       color: var(--muted);
       font-size: 0.9rem;
       margin-bottom: 1rem;
+    }
+    .skill-block {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.8rem;
+      margin-bottom: 1.5rem;
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.5;
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--accent) 45%, var(--border)) transparent;
+    }
+    .skill-block::-webkit-scrollbar { height: 8px; }
+    .skill-block::-webkit-scrollbar-track { background: transparent; }
+    .skill-block::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--accent) 45%, var(--border));
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
     }
     .note a, footer a { color: var(--fg); }
     footer {
@@ -230,23 +253,39 @@
 <span class="cmd">curl</span> -Lo ~/.local/bin/oc <span class="str">https://oc.maxeonyx.com/releases/oc-x86_64-linux</span>
 <span class="cmd">chmod</span> +x ~/.local/bin/oc<button class="copy-btn" onclick="copyInstall()">Copy</button></div>
 
-    <p class="note">Repo: <a href="https://github.com/maxeonyx/oc">github.com/maxeonyx/oc</a><br>Site: <a href="https://oc.maxeonyx.com">oc.maxeonyx.com</a></p>
+    <p class="note">Requires: <code>tmux</code><br>Repo: <a href="https://github.com/maxeonyx/oc">github.com/maxeonyx/oc</a><br>Site: <a href="https://oc.maxeonyx.com">oc.maxeonyx.com</a></p>
 
     <h2>Agent Skill</h2>
     <p class="note">For <a href="https://opencode.ai">OpenCode</a> and compatible agents.</p>
 
     <div class="codeblock" id="skill-install-block"><span class="cmd">mkdir</span> -p ~/.config/opencode/skills/oc
 <span class="cmd">curl</span> -sLo ~/.config/opencode/skills/oc/SKILL.md \
-     <span class="str">https://oc.maxeonyx.com/SKILL.md</span><button class="copy-btn" onclick="copySkillInstall()">Copy</button></div>
+     <span class="str">https://maxeonyx.github.io/oc/SKILL.md</span><button class="copy-btn" onclick="copySkillInstall()">Copy</button></div>
 
-    <div class="codeblock"><span class="comment"># Start or reattach from the current repo</span>
-<span class="cmd">oc</span>
+    <div class="skill-block"><span class="comment">---</span>
+<span class="key">name:</span> <span class="str">oc</span>
+<span class="key">description:</span> <span class="str">When managing or reattaching long-running OpenCode sessions in tmux</span>
+<span class="comment">---</span>
 
-<span class="comment"># Jump straight to a known session</span>
-<span class="cmd">oc</span> dc
+<span class="comment"># oc</span>
 
-<span class="comment"># Save an alias for future launches</span>
-<span class="cmd">oc</span> alias dc ~/dc-main</div>
+Use <span class="cmd">oc</span> to view, jump to, and preserve OpenCode sessions in tmux.
+
+Prefer <span class="cmd">oc</span> when the goal is session continuity rather than raw tmux control: it keeps the OpenCode-oriented session list, aliases, and relaunch behavior in one place.
+
+<span class="comment"># Install</span>
+<span class="cmd">curl</span> -Lo ~/.local/bin/oc <span class="str">https://oc.maxeonyx.com/releases/oc-x86_64-linux</span>
+<span class="cmd">chmod</span> +x ~/.local/bin/oc
+
+Requires: <span class="cmd">tmux</span>
+
+<span class="comment"># Usage</span>
+<span class="cmd">oc</span>             <span class="comment"># Open the interactive dashboard</span>
+<span class="cmd">oc</span> dc          <span class="comment"># Attach to or launch the named session directly</span>
+<span class="cmd">oc</span> alias dc .  <span class="comment"># Save a named session for this directory</span>
+<span class="cmd">oc</span> rm dc       <span class="comment"># Remove the saved session and kill it if running</span>
+
+Sessions live in tmux so they survive SSH disconnects, terminal crashes, and laptop sleep.</div>
 
     <footer>
       <a href="https://github.com/maxeonyx/oc">GitHub</a> | <a href="https://oc.maxeonyx.com">Website</a>
@@ -266,7 +305,7 @@ chmod +x ~/.local/bin/oc`;
     function copySkillInstall() {
       const text = `mkdir -p ~/.config/opencode/skills/oc
 curl -sLo ~/.config/opencode/skills/oc/SKILL.md \
-     https://oc.maxeonyx.com/SKILL.md`;
+     https://maxeonyx.github.io/oc/SKILL.md`;
       navigator.clipboard.writeText(text);
       event.target.textContent = 'Copied!';
       setTimeout(() => event.target.textContent = 'Copy', 1500);
