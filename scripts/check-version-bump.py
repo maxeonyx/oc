@@ -15,6 +15,7 @@ NON_ARTIFACT_PATHS = {
     "README.md",
     "VISION.md",
     "docs",
+    "scripts",
     "tests",
 }
 
