@@ -99,6 +99,22 @@ fn run_tmux_output(args: &[&str], description: &str) -> Output {
         .unwrap_or_else(|error| panic!("Failed to {}: {}", description, error))
 }
 
+pub fn create_tmux_session(session_name: &str) {
+    let output = run_tmux_output(
+        &["new-session", "-d", "-s", session_name],
+        "create tmux session for test",
+    );
+
+    if !output.status.success() {
+        panic!(
+            "Failed to create tmux session {}\nstdout:\n{}\nstderr:\n{}",
+            session_name,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 fn tmux_session_exists(name: &str) -> bool {
     StdCommand::new("tmux")
         .args(["has-session", "-t", name])
@@ -270,19 +286,7 @@ impl TestEnv {
 
     pub fn create_tmux_session(&self, suffix: &str) -> String {
         let session_name = format!("{}{}", self.tmux_prefix, sanitize_scope_name(suffix));
-        let output = run_tmux_output(
-            &["new-session", "-d", "-s", &session_name],
-            "create tmux session for test",
-        );
-
-        if !output.status.success() {
-            panic!(
-                "Failed to create tmux session {}\nstdout:\n{}\nstderr:\n{}",
-                session_name,
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+        create_tmux_session(&session_name);
 
         session_name
     }

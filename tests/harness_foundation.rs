@@ -1,7 +1,7 @@
 mod common;
 
 use common::{
-    TestEnv, cleanup_tmux_sessions_with_prefix, wait_for_file_contains,
+    TestEnv, cleanup_tmux_sessions_with_prefix, create_tmux_session, wait_for_file_contains,
     wait_for_tmux_session_absent,
 };
 use predicates::prelude::*;
@@ -41,16 +41,7 @@ fn test_env_cleans_up_stale_tmux_sessions_before_use() {
     let bootstrap = TestEnv::new("pre-cleanup-bootstrap");
     let _ = bootstrap.create_tmux_session("placeholder");
 
-    let output = std::process::Command::new("tmux")
-        .args(["new-session", "-d", "-s", &stale_session])
-        .output()
-        .expect("Failed to create stale tmux session");
-    assert!(
-        output.status.success(),
-        "Failed to create stale tmux session\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    create_tmux_session(&stale_session);
 
     let env = TestEnv::new(scope_name);
 
