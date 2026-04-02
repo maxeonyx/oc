@@ -47,11 +47,9 @@ where
     F: FnMut() -> WaitStatus<T>,
 {
     let deadline = Instant::now() + timeout;
-    let mut last_observed = None;
 
     loop {
         let status = probe();
-        last_observed = Some(status.observed);
 
         if let Some(value) = status.value {
             return value;
@@ -60,9 +58,7 @@ where
         if Instant::now() >= deadline {
             panic!(
                 "Timed out waiting for {} after {:?}\nlast observed:\n{}",
-                description,
-                timeout,
-                last_observed.unwrap_or_else(|| String::from("<nothing observed>"))
+                description, timeout, status.observed
             );
         }
 
@@ -140,10 +136,19 @@ pub fn list_tmux_sessions_with_prefix(prefix: &str) -> Vec<String> {
 
 pub fn cleanup_tmux_sessions_with_prefix(prefix: &str) {
     for session_name in list_tmux_sessions_with_prefix(prefix) {
-        let _ = run_tmux_output(
+        let output = run_tmux_output(
             &["kill-session", "-t", &session_name],
             "kill tmux session during cleanup",
         );
+
+        if !output.status.success() && tmux_session_exists(&session_name) {
+            panic!(
+                "Failed to clean up tmux session {}\nstdout:\n{}\nstderr:\n{}",
+                session_name,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }
 
@@ -162,24 +167,39 @@ pub fn wait_for_tmux_session_exists(session_name: &str, timeout: Duration) {
     });
 }
 
-pub fn wait_for_tmux_session_absent(session_name: &str, _timeout: Duration) {
-    assert!(
-        !tmux_session_exists(session_name),
-        "session {} should be absent immediately",
-        session_name
-    );
+pub fn wait_for_tmux_session_absent(session_name: &str, timeout: Duration) {
+    let description = format!("tmux session {} to be absent", session_name);
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let exists = tmux_session_exists(session_name);
+        let observed = format!("session {} exists: {}", session_name, exists);
+
+        if exists {
+            WaitStatus::pending(observed)
+        } else {
+            WaitStatus::ready((), observed)
+        }
+    });
 }
 
-pub fn wait_for_file_contains(path: &Path, needle: &str, _timeout: Duration) -> String {
-    let contents = fs::read_to_string(path).unwrap_or_default();
-    assert!(
-        contents.contains(needle),
-        "Expected {} to contain {} but observed:\n{}",
-        path.display(),
-        needle,
-        contents
-    );
-    contents
+pub fn wait_for_file_contains(path: &Path, needle: &str, timeout: Duration) -> String {
+    let description = format!("file {} to contain {}", path.display(), needle);
+
+    wait_until(
+        &description,
+        timeout,
+        DEFAULT_POLL_INTERVAL,
+        || match fs::read_to_string(path) {
+            Ok(contents) => {
+                if contents.contains(needle) {
+                    WaitStatus::ready(contents.clone(), contents)
+                } else {
+                    WaitStatus::pending(contents)
+                }
+            }
+            Err(error) => WaitStatus::pending(format!("read error: {}", error)),
+        },
+    )
 }
 
 pub struct TestEnv {
@@ -192,6 +212,9 @@ pub struct TestEnv {
 
 impl TestEnv {
     pub fn new(scope_name: &str) -> Self {
+        let tmux_scope_prefix = tmux_scope_prefix(scope_name);
+        cleanup_tmux_sessions_with_prefix(&tmux_scope_prefix);
+
         let root_dir = env::temp_dir()
             .join("oc-tests")
             .join(sanitize_scope_name(scope_name))
@@ -204,14 +227,12 @@ impl TestEnv {
         fs::create_dir_all(&data_dir)
             .unwrap_or_else(|error| panic!("Failed to create {}: {}", data_dir.display(), error));
 
-        let tmux_scope_prefix = tmux_scope_prefix(scope_name);
-
         Self {
-            root_dir,
             aliases_file: config_dir.join("aliases"),
             opencode_db: data_dir.join("session-store.sqlite"),
             tmux_prefix: format!("{}{}-", tmux_scope_prefix, unique_token()),
             tmux_scope_prefix,
+            root_dir,
         }
     }
 
@@ -236,7 +257,11 @@ impl TestEnv {
     }
 
     pub fn oc_cmd(&self) -> Command {
-        Command::cargo_bin("oc").expect("oc binary should build for tests")
+        let mut cmd = Command::cargo_bin("oc").expect("oc binary should build for tests");
+        cmd.env("OC_ALIASES_FILE", &self.aliases_file)
+            .env("OC_TMUX_PREFIX", &self.tmux_prefix)
+            .env("OC_OPENCODE_DB", &self.opencode_db);
+        cmd
     }
 
     pub fn list_tmux_sessions(&self) -> Vec<String> {
@@ -273,6 +298,7 @@ impl TestEnv {
 
 impl Drop for TestEnv {
     fn drop(&mut self) {
+        cleanup_tmux_sessions_with_prefix(&self.tmux_scope_prefix);
         let _ = fs::remove_dir_all(&self.root_dir);
     }
 }

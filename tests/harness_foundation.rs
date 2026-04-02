@@ -1,6 +1,9 @@
 mod common;
 
-use common::{TestEnv, wait_for_file_contains, wait_for_tmux_session_absent};
+use common::{
+    TestEnv, cleanup_tmux_sessions_with_prefix, wait_for_file_contains,
+    wait_for_tmux_session_absent,
+};
 use predicates::prelude::*;
 use std::fs;
 use std::time::Duration;
@@ -30,7 +33,10 @@ fn test_env_injects_runtime_overrides_into_oc() {
 #[test]
 fn test_env_cleans_up_stale_tmux_sessions_before_use() {
     let scope_name = "pre-cleanup";
-    let stale_session = format!("{}stale", TestEnv::scope_tmux_prefix(scope_name));
+    let scope_prefix = TestEnv::scope_tmux_prefix(scope_name);
+    let stale_session = format!("{}stale", scope_prefix);
+
+    cleanup_tmux_sessions_with_prefix(&scope_prefix);
 
     let bootstrap = TestEnv::new("pre-cleanup-bootstrap");
     let _ = bootstrap.create_tmux_session("placeholder");
