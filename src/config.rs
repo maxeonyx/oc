@@ -28,6 +28,10 @@ impl RuntimeConfig {
         &self.session_db_path
     }
 
+    pub fn tmux_prefix(&self) -> &str {
+        &self.tmux_prefix
+    }
+
     pub fn write_debug_dump(&self) {
         // Keep the historical key name for the hidden test/debug command while the
         // compatibility environment variable remains OC_ALIASES_FILE.

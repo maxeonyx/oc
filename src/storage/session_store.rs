@@ -3,7 +3,7 @@ use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, params};
 use std::fs;
 use std::path::Path;
 
-use crate::session::{NewSessionAlias, SavedSession};
+use crate::session::{NewSessionAlias, SavedSession, SessionRef};
 
 use super::schema;
 
@@ -71,6 +71,45 @@ impl SessionStore {
 
         Ok(())
     }
+
+    pub fn resolve_session_ref(&self, session_ref: &SessionRef) -> Result<SavedSession> {
+        match session_ref {
+            SessionRef::NumericId(id) => self.find_by_id(*id),
+            SessionRef::Name(name) => self.find_by_name(name),
+        }
+    }
+
+    fn find_by_id(&self, id: i64) -> Result<SavedSession> {
+        self.connection
+            .query_row(
+                "
+                SELECT id, name, directory, opencode_session_id, opencode_args
+                FROM sessions
+                WHERE id = ?1
+                ",
+                params![id],
+                map_saved_session_row,
+            )
+            .optional()
+            .with_context(|| format!("failed to look up session with numeric ID {id}"))?
+            .ok_or_else(|| anyhow!("Session {id} not found"))
+    }
+
+    fn find_by_name(&self, name: &str) -> Result<SavedSession> {
+        self.connection
+            .query_row(
+                "
+                SELECT id, name, directory, opencode_session_id, opencode_args
+                FROM sessions
+                WHERE name = ?1
+                ",
+                params![name],
+                map_saved_session_row,
+            )
+            .optional()
+            .with_context(|| format!("failed to look up session alias '{name}'"))?
+            .ok_or_else(|| anyhow!("Session alias '{name}' not found"))
+    }
 }
 
 fn ensure_parent_dir(db_path: &Path) -> Result<()> {
@@ -116,6 +155,12 @@ fn next_session_id(transaction: &Transaction<'_>) -> Result<i64> {
 
 fn serialize_opencode_args(opencode_args: &[String]) -> Result<String> {
     serde_json::to_string(opencode_args).context("failed to serialize OpenCode args")
+}
+
+fn deserialize_opencode_args(opencode_args_json: String) -> Result<Vec<String>> {
+    serde_json::from_str(&opencode_args_json).with_context(|| {
+        format!("failed to deserialize OpenCode args from stored JSON: {opencode_args_json}")
+    })
 }
 
 fn insert_alias_row(
@@ -173,4 +218,23 @@ fn alias_name_exists(transaction: &Transaction<'_>, name: &str) -> Result<bool> 
         })?;
 
     Ok(existing_name.is_some())
+}
+
+fn map_saved_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SavedSession> {
+    let opencode_args_json = row.get::<_, String>(4)?;
+    let opencode_args = deserialize_opencode_args(opencode_args_json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            4,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::other(error.to_string())),
+        )
+    })?;
+
+    Ok(SavedSession {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        directory: Path::new(&row.get::<_, String>(2)?).to_path_buf(),
+        opencode_session_id: row.get(3)?,
+        opencode_args,
+    })
 }

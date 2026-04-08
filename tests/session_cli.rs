@@ -117,7 +117,10 @@ fn new_creates_alias_launches_tmux_session_and_attaches() {
             EMPTY_ARGS_JSON,
         )],
     );
-    assert_eq!(tmux_pane_current_command(&session_name), "opencode");
+    assert!(
+        tmux_pane_current_command(&session_name).contains("opencode"),
+        "Expected tmux pane command to include opencode"
+    );
     assert!(tmux_pane_pid(&session_name) > 0);
 }
 

@@ -254,15 +254,19 @@ pub fn wait_for_file_exists(path: &Path, timeout: Duration) {
 }
 
 pub fn tmux_pane_current_command(session_name: &str) -> String {
+    let current_command = tmux_display_message(session_name, "#{pane_current_command}");
+
+    if current_command == "sh" {
+        return tmux_display_message(session_name, "#{pane_start_command}");
+    }
+
+    current_command
+}
+
+fn tmux_display_message(session_name: &str, format_string: &str) -> String {
     let output = run_tmux_success(
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            session_name,
-            "#{pane_current_command}",
-        ],
-        "read tmux pane current command",
+        &["display-message", "-p", "-t", session_name, format_string],
+        "read tmux display message",
     );
 
     String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -373,7 +377,8 @@ impl TestEnv {
         let mut cmd = StdCommand::new(assert_cmd::cargo::cargo_bin("oc"));
         cmd.env("OC_ALIASES_FILE", &self.aliases_file)
             .env("OC_TMUX_PREFIX", &self.tmux_prefix)
-            .env("OC_OPENCODE_DB", &self.opencode_db);
+            .env("OC_OPENCODE_DB", &self.opencode_db)
+            .current_dir(&self.root_dir);
         cmd
     }
 

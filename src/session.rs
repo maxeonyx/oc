@@ -29,6 +29,22 @@ impl NewSessionAlias {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionRef {
+    NumericId(i64),
+    Name(String),
+}
+
+impl SessionRef {
+    pub fn parse(input: &str) -> Result<Self> {
+        match input.parse::<i64>() {
+            Ok(id) if id > 0 => Ok(Self::NumericId(id)),
+            Ok(_) => bail!("Session ID '{input}' must be a positive integer"),
+            Err(_) => Ok(Self::Name(String::from(input))),
+        }
+    }
+}
+
 fn validate_session_name(name: &str) -> Result<()> {
     if name.parse::<u64>().is_ok() {
         bail!(

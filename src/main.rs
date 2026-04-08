@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod session;
 mod storage;
+mod tmux;
 
 use clap::Parser;
 use std::process::ExitCode;

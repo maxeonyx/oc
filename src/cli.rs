@@ -14,6 +14,13 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    #[command(visible_alias = "n")]
+    New {
+        name: String,
+        dir: Option<PathBuf>,
+        #[arg(last = true)]
+        opencode_args: Vec<String>,
+    },
     Alias {
         name: String,
         dir: Option<PathBuf>,
@@ -22,6 +29,13 @@ pub enum Command {
     },
     Unalias {
         name: String,
+    },
+    #[command(name = "rm", visible_aliases = ["delete", "d"])]
+    Rm {
+        target: String,
+    },
+    Stop {
+        target: String,
     },
     #[command(name = "__dump-runtime-config", hide = true)]
     DumpRuntimeConfig,
