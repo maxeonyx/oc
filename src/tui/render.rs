@@ -13,7 +13,7 @@ pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(8),
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Length(3),
         ])
         .split(frame.area());
@@ -40,70 +40,57 @@ fn render_sessions(state: &DashboardState) -> Paragraph<'static> {
     let widths = column_widths(state);
     let totals = state.totals();
 
-    let lines = state
-        .display_rows
-        .iter()
-        .enumerate()
-        .map(|(index, row)| match row {
-            DisplayRow::GroupHeader { title } => Line::from(Span::styled(
-                format!("─ {title} ─"),
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
-            DisplayRow::NewSession => {
-                let content = format!(
-                    "{:<id_width$}  {:<name_width$}  {:<status_width$}  {:<memory_width$}  {}",
-                    "+",
-                    "New session",
-                    "create",
-                    "-",
-                    "Start a new named session",
-                    id_width = widths.id,
-                    name_width = widths.name,
-                    status_width = widths.status,
-                    memory_width = widths.memory,
-                );
+    let mut lines = vec![Line::from(Span::styled(
+        format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", &widths),
+        Style::default().add_modifier(Modifier::BOLD | Modifier::DIM),
+    ))];
 
-                Line::from(Span::styled(
-                    content,
+    lines.extend(
+        state
+            .display_rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| match row {
+                DisplayRow::GroupHeader { title } => Line::from(Span::styled(
+                    format!("─ {title} ─"),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+                DisplayRow::NewSession => Line::from(Span::styled(
+                    format_column_row(
+                        "+",
+                        "New session",
+                        "create",
+                        "-",
+                        "Start a new named session",
+                        &widths,
+                    ),
                     selection_style(index == state.selected_index),
-                ))
-            }
-            DisplayRow::Session(row) => {
-                let content = format!(
-                    "{:<id_width$}  {:<name_width$}  {:<status_width$}  {:<memory_width$}  {}",
-                    row.session_id,
-                    row.name,
-                    row.status_label(),
-                    row.memory_label(),
-                    row.directory,
-                    id_width = widths.id,
-                    name_width = widths.name,
-                    status_width = widths.status,
-                    memory_width = widths.memory,
-                );
+                )),
+                DisplayRow::Session(row) => Line::from(Span::styled(
+                    format_column_row(
+                        &row.session_id.to_string(),
+                        &row.name,
+                        row.status_label(),
+                        &row.memory_label(),
+                        &row.directory,
+                        &widths,
+                    ),
+                    selection_style(index == state.selected_index),
+                )),
+            }),
+    );
 
-                Line::from(Span::styled(
-                    content,
-                    selection_style(index == state.selected_index),
-                ))
-            }
-        })
-        .chain(std::iter::once(Line::from(Span::styled(
-            format!(
-                "{:<id_width$}  {:<name_width$}  {:<status_width$}  {:<memory_width$}  {}",
-                totals.filtered_sessions,
-                "total sessions",
-                totals.filtered_running,
-                format_memory(totals.filtered_memory_bytes),
-                "filtered",
-                id_width = widths.id,
-                name_width = widths.name,
-                status_width = widths.status,
-                memory_width = widths.memory,
-            ),
-            Style::default().add_modifier(Modifier::DIM | Modifier::BOLD),
-        ))))
-        .collect::<Vec<_>>();
+    lines.push(Line::from(Span::styled(
+        format_column_row(
+            &totals.filtered_sessions.to_string(),
+            "total sessions",
+            &totals.filtered_running.to_string(),
+            &format_memory(totals.filtered_memory_bytes),
+            "filtered",
+            &widths,
+        ),
+        Style::default().add_modifier(Modifier::DIM | Modifier::BOLD),
+    )));
 
     Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Dashboard"))
 }
@@ -119,12 +106,19 @@ fn render_action_bar(state: &DashboardState) -> Paragraph<'static> {
 
     Paragraph::new(vec![
         Line::from(Span::styled(
-            format!("Action: {selected}"),
-            Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            format!("←  {selected:^12}  →"),
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD),
         )),
-        Line::from(Span::raw(actions)),
+        Line::from(Span::styled(
+            format!("ENTER runs selected action    {actions}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
     ])
-    .block(Block::default().borders(Borders::ALL).title("Actions"))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Current Action"),
+    )
 }
 
 fn render_input_bar(state: &DashboardState) -> Paragraph<'static> {
@@ -151,11 +145,11 @@ fn selection_style(selected: bool) -> Style {
 
 fn action_label(action: DashboardAction) -> &'static str {
     match action {
-        DashboardAction::Attach => "attach",
-        DashboardAction::Stop => "stop",
-        DashboardAction::Remove => "rm",
-        DashboardAction::Restart => "restart",
-        DashboardAction::Create => "create",
+        DashboardAction::Attach => "ATTACH",
+        DashboardAction::Stop => "STOP",
+        DashboardAction::Remove => "RM",
+        DashboardAction::Restart => "RESTART",
+        DashboardAction::Create => "CREATE",
     }
 }
 
@@ -174,12 +168,44 @@ struct ColumnWidths {
     memory: usize,
 }
 
+fn format_column_row(
+    id: &str,
+    name: &str,
+    status: &str,
+    memory: &str,
+    directory: &str,
+    widths: &ColumnWidths,
+) -> String {
+    format!(
+        "{:<id_width$}  {:<name_width$}  {:<status_width$}  {:<memory_width$}  {}",
+        id,
+        name,
+        status,
+        memory,
+        directory,
+        id_width = widths.id,
+        name_width = widths.name,
+        status_width = widths.status,
+        memory_width = widths.memory,
+    )
+}
+
 fn column_widths(state: &DashboardState) -> ColumnWidths {
+    let totals = state.totals();
     let mut widths = ColumnWidths {
-        id: 2,
-        name: "New session".len(),
-        status: "detached".len(),
-        memory: "523 MiB".len(),
+        id: "ID".len().max(totals.filtered_sessions.to_string().len()),
+        name: "New session"
+            .len()
+            .max("total sessions".len())
+            .max("NAME".len()),
+        status: "detached"
+            .len()
+            .max(totals.filtered_running.to_string().len())
+            .max("STATUS".len()),
+        memory: "523 MiB"
+            .len()
+            .max(format_memory(totals.filtered_memory_bytes).len())
+            .max("MEMORY".len()),
     };
 
     for row in &state.snapshot.rows {
