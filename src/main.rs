@@ -7,6 +7,7 @@ mod session;
 mod session_list;
 mod storage;
 mod tmux;
+mod tui;
 
 use clap::Parser;
 use std::process::ExitCode;

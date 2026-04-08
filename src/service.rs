@@ -126,18 +126,20 @@ impl SessionService {
     }
 
     pub fn auto_attach_directory_match(&self) -> Result<bool> {
-        let current_directory =
-            env::current_dir().context("failed to determine current working directory")?;
-        let store = self.open_session_store()?;
-        let matching_sessions = find_saved_sessions_in_directory(&store, &current_directory)?;
-
-        match matching_sessions.as_slice() {
+        match self.current_directory_matches()?.as_slice() {
             [saved_session] => {
                 self.activate_session(saved_session)?;
                 Ok(true)
             }
             _ => Ok(false),
         }
+    }
+
+    pub fn current_directory_matches(&self) -> Result<Vec<SavedSession>> {
+        let current_directory =
+            env::current_dir().context("failed to determine current working directory")?;
+        let store = self.open_session_store()?;
+        find_saved_sessions_in_directory(&store, &current_directory)
     }
 
     fn open_session_store(&self) -> Result<SessionStore> {

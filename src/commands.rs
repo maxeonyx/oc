@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use crate::cli::RequestedAction;
 use crate::service::SessionService;
+use crate::tui;
 
 pub fn run(service: &SessionService, action: RequestedAction) -> Result<()> {
     match action {
@@ -20,8 +21,11 @@ pub fn run(service: &SessionService, action: RequestedAction) -> Result<()> {
         RequestedAction::Stop { target } => service.stop_session(&target),
         RequestedAction::AttachTarget { target } => service.activate_target(&target),
         RequestedAction::Default => {
-            service.auto_attach_directory_match()?;
-            Ok(())
+            if service.auto_attach_directory_match()? {
+                return Ok(());
+            }
+
+            tui::run_dashboard(service)
         }
         RequestedAction::DumpSessionList => run_dump_session_list(service),
         RequestedAction::DumpRuntimeConfig => {
