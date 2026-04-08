@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command as StdCommand, Output};
+use std::process::{Child, Command as StdCommand, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -304,6 +304,61 @@ pub fn detach_tmux_client_from_session(session_name: &str) {
             stderr,
         );
     }
+}
+
+pub fn tmux_session_attached_count(session_name: &str) -> usize {
+    let output = run_tmux_success(
+        &[
+            "list-sessions",
+            "-F",
+            "#{session_name}\t#{session_attached}",
+        ],
+        "read tmux attached session count",
+    );
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| {
+            let (name, attached_count) = line.split_once('\t')?;
+            (name == session_name).then_some(attached_count)
+        })
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or_else(|error| panic!("Failed to parse tmux attached count: {}", error))
+}
+
+pub fn wait_for_tmux_session_attached(session_name: &str, timeout: Duration) {
+    let description = format!("tmux session {} to be attached", session_name);
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let attached_count = tmux_session_attached_count(session_name);
+        let observed = format!(
+            "session {} attached count: {}",
+            session_name, attached_count
+        );
+
+        if attached_count > 0 {
+            WaitStatus::ready((), observed)
+        } else {
+            WaitStatus::pending(observed)
+        }
+    });
+}
+
+pub fn spawn_tmux_attach_client(session_name: &str) -> Child {
+    StdCommand::new("script")
+        .args([
+            "-qec",
+            &format!("tmux attach-session -t {}", session_name),
+            "/dev/null",
+        ])
+        .spawn()
+        .unwrap_or_else(|error| {
+            panic!(
+                "Failed to attach tmux client for {}: {}",
+                session_name, error
+            )
+        })
 }
 
 pub fn wait_for_tmux_client_detach_window() {
