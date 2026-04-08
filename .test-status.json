@@ -1,6 +1,13 @@
 {
   "$schema": "https://tdd-ratchet.maxeonyx.com/schema/test-status.v1.json",
   "tests": {
+    "oc::alias_cli$alias_assigns_dense_gap_filling_ids": "pending",
+    "oc::alias_cli$alias_creates_db_and_inserts_session_with_default_dir": "pending",
+    "oc::alias_cli$alias_rejects_duplicate_name": "pending",
+    "oc::alias_cli$alias_rejects_plain_numeric_name": "pending",
+    "oc::alias_cli$alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash": "pending",
+    "oc::alias_cli$unalias_missing_name_fails_cleanly": "pending",
+    "oc::alias_cli$unalias_removes_mapping_by_name": "pending",
     "oc::gatekeeper$tdd_ratchet_gatekeeper": "passing",
     "oc::harness_foundation$test_env_cleans_up_stale_tmux_sessions_before_use": "passing",
     "oc::harness_foundation$test_env_drop_cleans_up_tmux_sessions": "passing",
