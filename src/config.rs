@@ -1,6 +1,9 @@
 use anyhow::{Result, anyhow};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+const SESSION_DB_ENV_VAR: &str = "OC_ALIASES_FILE";
+const DEFAULT_SESSION_DB_PATH: &str = ".config/oc/oc.db";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -14,18 +17,20 @@ impl RuntimeConfig {
         let home_dir = home_dir()?;
 
         Ok(Self {
-            session_db_path: env_path("OC_ALIASES_FILE")
-                .unwrap_or_else(|| home_dir.join(".config/oc/oc.db")),
+            session_db_path: env_path(SESSION_DB_ENV_VAR)
+                .unwrap_or_else(|| home_dir.join(DEFAULT_SESSION_DB_PATH)),
             tmux_prefix: env::var("OC_TMUX_PREFIX").unwrap_or_else(|_| String::from("oc-")),
             opencode_db: env_path("OC_OPENCODE_DB"),
         })
     }
 
-    pub fn session_db_path(&self) -> &PathBuf {
+    pub fn session_db_path(&self) -> &Path {
         &self.session_db_path
     }
 
     pub fn write_debug_dump(&self) {
+        // Keep the historical key name for the hidden test/debug command while the
+        // compatibility environment variable remains OC_ALIASES_FILE.
         println!("aliases_file={}", self.session_db_path.display());
         println!("tmux_prefix={}", self.tmux_prefix);
 

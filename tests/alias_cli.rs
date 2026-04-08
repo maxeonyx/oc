@@ -6,6 +6,8 @@ use rusqlite::{Connection, OpenFlags, params};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const EMPTY_ARGS_JSON: &str = "[]";
+
 #[derive(Debug, PartialEq, Eq)]
 struct SavedSessionRow {
     id: i64,
@@ -44,6 +46,28 @@ fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
         .expect("session rows should decode")
 }
 
+fn saved_session(id: i64, name: &str, directory: &Path, opencode_args: &str) -> SavedSessionRow {
+    SavedSessionRow {
+        id,
+        name: String::from(name),
+        directory: directory.to_path_buf(),
+        opencode_session_id: None,
+        opencode_args: String::from(opencode_args),
+    }
+}
+
+fn alias_in_root_dir(env: &TestEnv, name: &str) {
+    env.oc_cmd()
+        .current_dir(env.root_dir())
+        .args(["alias", name])
+        .assert()
+        .success();
+}
+
+fn assert_saved_sessions(env: &TestEnv, expected_rows: Vec<SavedSessionRow>) {
+    assert_eq!(read_saved_sessions(env.aliases_file()), expected_rows);
+}
+
 #[test]
 fn alias_creates_db_and_inserts_session_with_default_dir() {
     let env = TestEnv::new("alias-default-dir");
@@ -60,15 +84,14 @@ fn alias_creates_db_and_inserts_session_with_default_dir() {
         env.aliases_file().display()
     );
 
-    assert_eq!(
-        read_saved_sessions(env.aliases_file()),
-        vec![SavedSessionRow {
-            id: 1,
-            name: String::from("worktree"),
-            directory: env.root_dir().to_path_buf(),
-            opencode_session_id: None,
-            opencode_args: String::from("[]"),
-        }]
+    assert_saved_sessions(
+        &env,
+        vec![saved_session(
+            1,
+            "worktree",
+            env.root_dir(),
+            EMPTY_ARGS_JSON,
+        )],
     );
 }
 
@@ -94,15 +117,14 @@ fn alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash() {
         .assert()
         .success();
 
-    assert_eq!(
-        read_saved_sessions(env.aliases_file()),
-        vec![SavedSessionRow {
-            id: 1,
-            name: String::from("dc"),
-            directory: project_dir,
-            opencode_session_id: None,
-            opencode_args: String::from("[\"--model\",\"gpt-5.4\",\"--sandbox\",\"read-only\"]"),
-        }]
+    assert_saved_sessions(
+        &env,
+        vec![saved_session(
+            1,
+            "dc",
+            &project_dir,
+            "[\"--model\",\"gpt-5.4\",\"--sandbox\",\"read-only\"]",
+        )],
     );
 }
 
@@ -121,11 +143,7 @@ fn alias_rejects_plain_numeric_name() {
 fn alias_rejects_duplicate_name() {
     let env = TestEnv::new("alias-rejects-duplicate-name");
 
-    env.oc_cmd()
-        .current_dir(env.root_dir())
-        .args(["alias", "dc"])
-        .assert()
-        .success();
+    alias_in_root_dir(&env, "dc");
 
     env.oc_cmd()
         .current_dir(env.root_dir())
@@ -134,15 +152,9 @@ fn alias_rejects_duplicate_name() {
         .failure()
         .stderr(predicate::str::contains("already exists"));
 
-    assert_eq!(
-        read_saved_sessions(env.aliases_file()),
-        vec![SavedSessionRow {
-            id: 1,
-            name: String::from("dc"),
-            directory: env.root_dir().to_path_buf(),
-            opencode_session_id: None,
-            opencode_args: String::from("[]"),
-        }]
+    assert_saved_sessions(
+        &env,
+        vec![saved_session(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
     );
 }
 
@@ -150,53 +162,19 @@ fn alias_rejects_duplicate_name() {
 fn alias_assigns_dense_gap_filling_ids() {
     let env = TestEnv::new("alias-gap-filling-ids");
 
-    env.oc_cmd()
-        .current_dir(env.root_dir())
-        .args(["alias", "one"])
-        .assert()
-        .success();
-    env.oc_cmd()
-        .current_dir(env.root_dir())
-        .args(["alias", "two"])
-        .assert()
-        .success();
-    env.oc_cmd()
-        .current_dir(env.root_dir())
-        .args(["alias", "three"])
-        .assert()
-        .success();
+    alias_in_root_dir(&env, "one");
+    alias_in_root_dir(&env, "two");
+    alias_in_root_dir(&env, "three");
     env.oc_cmd().args(["unalias", "two"]).assert().success();
-    env.oc_cmd()
-        .current_dir(env.root_dir())
-        .args(["alias", "four"])
-        .assert()
-        .success();
+    alias_in_root_dir(&env, "four");
 
-    assert_eq!(
-        read_saved_sessions(env.aliases_file()),
+    assert_saved_sessions(
+        &env,
         vec![
-            SavedSessionRow {
-                id: 1,
-                name: String::from("one"),
-                directory: env.root_dir().to_path_buf(),
-                opencode_session_id: None,
-                opencode_args: String::from("[]"),
-            },
-            SavedSessionRow {
-                id: 2,
-                name: String::from("four"),
-                directory: env.root_dir().to_path_buf(),
-                opencode_session_id: None,
-                opencode_args: String::from("[]"),
-            },
-            SavedSessionRow {
-                id: 3,
-                name: String::from("three"),
-                directory: env.root_dir().to_path_buf(),
-                opencode_session_id: None,
-                opencode_args: String::from("[]"),
-            },
-        ]
+            saved_session(1, "one", env.root_dir(), EMPTY_ARGS_JSON),
+            saved_session(2, "four", env.root_dir(), EMPTY_ARGS_JSON),
+            saved_session(3, "three", env.root_dir(), EMPTY_ARGS_JSON),
+        ],
     );
 }
 
@@ -204,11 +182,7 @@ fn alias_assigns_dense_gap_filling_ids() {
 fn unalias_removes_mapping_by_name() {
     let env = TestEnv::new("unalias-removes-mapping");
 
-    env.oc_cmd()
-        .current_dir(env.root_dir())
-        .args(["alias", "dc"])
-        .assert()
-        .success();
+    alias_in_root_dir(&env, "dc");
 
     env.oc_cmd().args(["unalias", "dc"]).assert().success();
 
