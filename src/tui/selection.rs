@@ -40,7 +40,15 @@ pub fn preferred_action_for_row(row: &DisplayRow, current: DashboardAction) -> D
         return current;
     }
 
-    DashboardAction::Attach
+    if available.contains(&current) {
+        return current;
+    }
+
+    if available.contains(&DashboardAction::Attach) {
+        DashboardAction::Attach
+    } else {
+        available[0]
+    }
 }
 
 pub fn available_actions(row: &DisplayRow) -> Vec<DashboardAction> {
@@ -57,20 +65,9 @@ pub fn is_selectable_row(row: &DisplayRow) -> bool {
 
 fn default_selected_identity(
     display_rows: &[DisplayRow],
-    current_directory: Option<&std::path::Path>,
+    _current_directory: Option<&std::path::Path>,
 ) -> Option<SelectedIdentity> {
-    if let Some(current_directory) = current_directory {
-        for row in display_rows {
-            match row {
-                DisplayRow::Session(session) if session.full_directory == current_directory => {
-                    return Some(SelectedIdentity::Session(session.session_id));
-                }
-                _ => {}
-            }
-        }
-    }
-
-    display_rows.iter().find_map(|row| match row {
+    display_rows.iter().rev().find_map(|row| match row {
         DisplayRow::NewSession => Some(SelectedIdentity::NewSession),
         DisplayRow::Session(session) => Some(SelectedIdentity::Session(session.session_id)),
         _ => None,
