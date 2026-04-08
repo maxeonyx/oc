@@ -2,6 +2,7 @@ mod app;
 mod cli;
 mod commands;
 mod config;
+mod service;
 mod session;
 mod session_list;
 mod storage;
