@@ -32,6 +32,13 @@
     "oc::session_cli$stop_accepts_numeric_id": "passing",
     "oc::session_cli$stop_fails_cleanly_when_target_not_found": "passing",
     "oc::session_cli$stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias": "passing",
+    "oc::tui_logic$available_actions_depend_on_row_status": "pending",
+    "oc::tui_logic$command_parser_rejects_invalid_input": "pending",
+    "oc::tui_logic$command_parser_supports_dashboard_commands": "pending",
+    "oc::tui_logic$empty_filter_places_new_row_after_directory_matches": "pending",
+    "oc::tui_logic$empty_filter_shows_new_row_then_sessions_when_no_directory_match": "pending",
+    "oc::tui_logic$filter_groups_by_priority_then_match_strength": "pending",
+    "oc::tui_logic$filter_uses_highest_priority_match_only_once": "pending",
     "oc::version_smoke$version_flag_prints_package_version": "passing"
   }
 }

@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::path::PathBuf;
 
 use crate::session::{SavedSession, SessionListEntry, SessionStatus};
 
@@ -20,7 +21,30 @@ pub struct DashboardRow {
     pub session_id: i64,
     pub name: String,
     pub directory: String,
+    pub opencode_session_id: Option<String>,
     pub status: SessionStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DashboardAction {
+    Attach,
+    Stop,
+    Remove,
+    Restart,
+    Create,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    Filter,
+    Command,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DisplayRow {
+    GroupHeader { title: String },
+    NewSession,
+    Session(DashboardRow),
 }
 
 impl DashboardSnapshot {
@@ -56,6 +80,7 @@ impl DashboardRow {
             session_id: saved_session.id,
             name: saved_session.name.clone(),
             directory: abbreviate_directory(&saved_session),
+            opencode_session_id: saved_session.opencode_session_id,
             status: entry.status,
         }
     }
@@ -66,6 +91,44 @@ impl DashboardRow {
             SessionStatus::RunningDetached => "detached",
             SessionStatus::Saved => "saved",
         }
+    }
+
+    pub fn available_actions(&self) -> Vec<DashboardAction> {
+        match self.status {
+            SessionStatus::RunningAttached | SessionStatus::RunningDetached => {
+                vec![DashboardAction::Attach]
+            }
+            SessionStatus::Saved => vec![DashboardAction::Attach],
+        }
+    }
+}
+
+impl DisplayRow {
+    pub fn session(&self) -> Option<&DashboardRow> {
+        match self {
+            Self::Session(row) => Some(row),
+            _ => None,
+        }
+    }
+}
+
+impl DashboardSnapshot {
+    pub fn display_rows(
+        &self,
+        filter_text: &str,
+        _input_mode: InputMode,
+        _current_directory: Option<PathBuf>,
+    ) -> Vec<DisplayRow> {
+        if filter_text.is_empty() {
+            return self.rows.iter().cloned().map(DisplayRow::Session).collect();
+        }
+
+        self.rows
+            .iter()
+            .filter(|row| row.name.contains(filter_text))
+            .cloned()
+            .map(DisplayRow::Session)
+            .collect()
     }
 }
 

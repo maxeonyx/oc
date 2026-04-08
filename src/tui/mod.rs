@@ -1,5 +1,6 @@
-mod app;
-mod model;
+pub mod app;
+pub mod command;
+pub mod model;
 mod render;
 
 use anyhow::Result;
