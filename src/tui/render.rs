@@ -38,6 +38,7 @@ fn render_summary(state: &DashboardState) -> Paragraph<'static> {
 
 fn render_sessions(state: &DashboardState) -> Paragraph<'static> {
     let widths = column_widths(state);
+    let totals = state.totals();
 
     let lines = state
         .display_rows
@@ -50,14 +51,16 @@ fn render_sessions(state: &DashboardState) -> Paragraph<'static> {
             )),
             DisplayRow::NewSession => {
                 let content = format!(
-                    "{:<id_width$}  {:<name_width$}  {:<status_width$}  {}",
+                    "{:<id_width$}  {:<name_width$}  {:<status_width$}  {:<memory_width$}  {}",
                     "+",
                     "New session",
                     "create",
+                    "-",
                     "Start a new named session",
                     id_width = widths.id,
                     name_width = widths.name,
                     status_width = widths.status,
+                    memory_width = widths.memory,
                 );
 
                 Line::from(Span::styled(
@@ -67,14 +70,16 @@ fn render_sessions(state: &DashboardState) -> Paragraph<'static> {
             }
             DisplayRow::Session(row) => {
                 let content = format!(
-                    "{:<id_width$}  {:<name_width$}  {:<status_width$}  {}",
+                    "{:<id_width$}  {:<name_width$}  {:<status_width$}  {:<memory_width$}  {}",
                     row.session_id,
                     row.name,
                     row.status_label(),
+                    row.memory_label(),
                     row.directory,
                     id_width = widths.id,
                     name_width = widths.name,
                     status_width = widths.status,
+                    memory_width = widths.memory,
                 );
 
                 Line::from(Span::styled(
@@ -83,6 +88,21 @@ fn render_sessions(state: &DashboardState) -> Paragraph<'static> {
                 ))
             }
         })
+        .chain(std::iter::once(Line::from(Span::styled(
+            format!(
+                "{:<id_width$}  {:<name_width$}  {:<status_width$}  {:<memory_width$}  {}",
+                totals.filtered_sessions,
+                "total sessions",
+                totals.filtered_running,
+                format_memory(totals.filtered_memory_bytes),
+                "filtered",
+                id_width = widths.id,
+                name_width = widths.name,
+                status_width = widths.status,
+                memory_width = widths.memory,
+            ),
+            Style::default().add_modifier(Modifier::DIM | Modifier::BOLD),
+        ))))
         .collect::<Vec<_>>();
 
     Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Dashboard"))
@@ -139,10 +159,19 @@ fn action_label(action: DashboardAction) -> &'static str {
     }
 }
 
+fn format_memory(bytes: u64) -> String {
+    if bytes == 0 {
+        return String::from("0 MiB");
+    }
+
+    format!("{} MiB", bytes / 1024 / 1024)
+}
+
 struct ColumnWidths {
     id: usize,
     name: usize,
     status: usize,
+    memory: usize,
 }
 
 fn column_widths(state: &DashboardState) -> ColumnWidths {
@@ -150,12 +179,14 @@ fn column_widths(state: &DashboardState) -> ColumnWidths {
         id: 2,
         name: "New session".len(),
         status: "detached".len(),
+        memory: "523 MiB".len(),
     };
 
     for row in &state.snapshot.rows {
         widths.id = widths.id.max(row.session_id.to_string().len());
         widths.name = widths.name.max(row.name.len());
         widths.status = widths.status.max(row.status_label().len());
+        widths.memory = widths.memory.max(row.memory_label().len());
     }
 
     widths

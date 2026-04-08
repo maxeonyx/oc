@@ -97,6 +97,23 @@ impl SessionStore {
         Ok(())
     }
 
+    pub fn save_imported_alias(&mut self, alias: NewSessionAlias) -> Result<Option<SavedSession>> {
+        if let Ok(existing) = self.find_by_name(&alias.name) {
+            if existing.directory == alias.directory
+                && existing.opencode_args == alias.opencode_args
+            {
+                return Ok(None);
+            }
+
+            bail!(
+                "Session alias '{}' already exists with different values",
+                alias.name
+            );
+        }
+
+        self.save_alias(alias).map(Some)
+    }
+
     pub fn list_saved_sessions(&self) -> Result<Vec<SavedSession>> {
         let mut statement = self
             .connection

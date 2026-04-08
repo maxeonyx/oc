@@ -2,7 +2,7 @@ mod common;
 
 use common::TestEnv;
 use predicates::prelude::*;
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, params};
 use std::fs;
 use std::path::{Path, PathBuf};
 

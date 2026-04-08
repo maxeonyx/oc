@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::io::{IsTerminal, stdin, stdout};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -148,6 +149,7 @@ impl Tmux {
         Ok(String::from_utf8_lossy(&output.stdout)
             .lines()
             .filter_map(|line| parse_managed_session_line(line, &self.prefix))
+            .map(enrich_runtime)
             .collect())
     }
 
@@ -281,7 +283,50 @@ fn parse_managed_session_line(line: &str, prefix: &str) -> Option<ManagedSession
     Some(ManagedSessionRuntime {
         tmux_session_name: String::from(session_name),
         attached_count: attached_count.parse().ok()?,
+        pane_pid: None,
+        memory_bytes: None,
     })
+}
+
+fn enrich_runtime(mut runtime: ManagedSessionRuntime) -> ManagedSessionRuntime {
+    runtime.pane_pid = pane_pid(&runtime.tmux_session_name).ok().flatten();
+    runtime.memory_bytes = runtime.pane_pid.and_then(|pid| {
+        read_process_memory_bytes(Path::new(&format!("/proc/{pid}/status")))
+            .ok()
+            .flatten()
+    });
+    runtime
+}
+
+fn pane_pid(session_name: &str) -> Result<Option<u32>> {
+    let output = Command::new("tmux")
+        .args(["display-message", "-p", "-t", session_name, "#{pane_pid}"])
+        .output()
+        .with_context(|| format!("failed to read pane pid for tmux session '{session_name}'"))?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let pid = String::from_utf8_lossy(&output.stdout).trim().parse().ok();
+    Ok(pid)
+}
+
+pub fn read_process_memory_bytes(status_path: &Path) -> Result<Option<u64>> {
+    let status = fs::read_to_string(status_path).with_context(|| {
+        format!(
+            "failed to read process status file {}",
+            status_path.display()
+        )
+    })?;
+
+    Ok(parse_memory_status(&status))
+}
+
+pub fn parse_memory_status(status: &str) -> Option<u64> {
+    let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
+    let value = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+    Some(value * 1024)
 }
 
 pub fn is_tmux_server_unavailable_error(stderr: &str) -> bool {

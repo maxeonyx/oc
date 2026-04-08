@@ -29,12 +29,16 @@ pub enum RequestedAction {
         target: String,
         new_dir: PathBuf,
     },
+    Migrate,
     AttachTarget {
         target: String,
     },
     Default,
     DumpSessionList,
     DumpRuntimeConfig,
+    ParseMemoryStatus {
+        path: PathBuf,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -84,8 +88,12 @@ impl Cli {
             (Some(Command::Move { target, new_dir }), None) => {
                 RequestedAction::Move { target, new_dir }
             }
+            (Some(Command::Migrate), None) => RequestedAction::Migrate,
             (Some(Command::DumpSessionList), None) => RequestedAction::DumpSessionList,
             (Some(Command::DumpRuntimeConfig), None) => RequestedAction::DumpRuntimeConfig,
+            (Some(Command::ParseMemoryStatus { path }), None) => {
+                RequestedAction::ParseMemoryStatus { path }
+            }
             (None, Some(target)) => RequestedAction::AttachTarget { target },
             (None, None) => RequestedAction::Default,
             (Some(_), Some(target)) => {
@@ -128,8 +136,13 @@ pub enum Command {
         target: String,
         new_dir: PathBuf,
     },
+    Migrate,
     #[command(name = "__dump-session-list", hide = true)]
     DumpSessionList,
     #[command(name = "__dump-runtime-config", hide = true)]
     DumpRuntimeConfig,
+    #[command(name = "__parse-memory-status", hide = true)]
+    ParseMemoryStatus {
+        path: PathBuf,
+    },
 }

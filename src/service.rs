@@ -14,6 +14,13 @@ pub struct SessionService {
     config: RuntimeConfig,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationReport {
+    pub imported: usize,
+    pub skipped: usize,
+    pub conflicts: Vec<String>,
+}
+
 impl SessionService {
     pub fn new(config: RuntimeConfig) -> Self {
         Self { config }
@@ -185,6 +192,26 @@ impl SessionService {
         find_saved_sessions_in_directory(&store, &current_directory)
     }
 
+    pub fn migrate_legacy_aliases(&self) -> Result<MigrationReport> {
+        let legacy_entries = read_legacy_aliases_file(self.config.legacy_aliases_path())?;
+        let mut store = self.open_session_store()?;
+        let mut report = MigrationReport {
+            imported: 0,
+            skipped: 0,
+            conflicts: Vec::new(),
+        };
+
+        for alias in legacy_entries {
+            match store.save_imported_alias(alias.clone()) {
+                Ok(Some(_)) => report.imported += 1,
+                Ok(None) => report.skipped += 1,
+                Err(_) => report.conflicts.push(alias.name),
+            }
+        }
+
+        Ok(report)
+    }
+
     fn open_session_store(&self) -> Result<SessionStore> {
         SessionStore::open(self.config.session_db_path())
     }
@@ -228,6 +255,29 @@ impl SessionService {
         tmux.attach_session(&tmux_session_name)
             .with_context(|| format!("failed to attach to session '{}'", saved_session.name))
     }
+}
+
+fn read_legacy_aliases_file(path: &Path) -> Result<Vec<NewSessionAlias>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("failed to read legacy aliases file {}", path.display()))?;
+
+    contents
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(parse_legacy_alias_line)
+        .collect()
+}
+
+fn parse_legacy_alias_line(line: &str) -> Result<NewSessionAlias> {
+    let (name, directory) = line
+        .split_once('\t')
+        .ok_or_else(|| anyhow::anyhow!("Legacy alias line must contain a tab separator: {line}"))?;
+
+    NewSessionAlias::new(String::from(name), PathBuf::from(directory), Vec::new())
 }
 
 fn launch_opencode_args(saved_session: &SavedSession) -> Vec<String> {

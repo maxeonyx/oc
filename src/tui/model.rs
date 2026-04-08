@@ -13,6 +13,9 @@ pub struct DashboardSummary {
     pub attached: usize,
     pub detached: usize,
     pub saved: usize,
+    pub filtered_sessions: usize,
+    pub filtered_running: usize,
+    pub filtered_memory_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +25,7 @@ pub struct DashboardRow {
     pub directory: String,
     pub full_directory: PathBuf,
     pub opencode_session_id: Option<String>,
+    pub memory_bytes: Option<u64>,
     pub status: SessionStatus,
 }
 
@@ -68,6 +72,9 @@ impl DashboardSnapshot {
             attached: 0,
             detached: 0,
             saved: 0,
+            filtered_sessions: 0,
+            filtered_running: 0,
+            filtered_memory_bytes: 0,
         };
 
         let rows = entries
@@ -89,6 +96,7 @@ impl DashboardSnapshot {
 
 impl DashboardRow {
     fn from_session_entry(entry: SessionListEntry) -> Self {
+        let memory_bytes = entry.runtime_memory_bytes();
         let saved_session = entry.saved_session;
 
         Self {
@@ -97,6 +105,7 @@ impl DashboardRow {
             directory: abbreviate_directory(&saved_session),
             full_directory: saved_session.directory,
             opencode_session_id: saved_session.opencode_session_id,
+            memory_bytes,
             status: entry.status,
         }
     }
@@ -127,6 +136,20 @@ impl DashboardRow {
             SessionStatus::Saved => vec![DashboardAction::Attach, DashboardAction::Remove],
         }
     }
+
+    pub fn memory_label(&self) -> String {
+        match self.memory_bytes {
+            Some(bytes) => format_memory(bytes),
+            None => String::from("-"),
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        matches!(
+            self.status,
+            SessionStatus::RunningAttached | SessionStatus::RunningDetached
+        )
+    }
 }
 
 impl DisplayRow {
@@ -146,10 +169,11 @@ impl DashboardSnapshot {
         current_directory: Option<PathBuf>,
     ) -> Vec<DisplayRow> {
         if input_mode == InputMode::Command || filter_text.is_empty() {
-            return self.display_rows_without_filter(current_directory.as_deref());
+            let rows = self.display_rows_without_filter(current_directory.as_deref());
+            return self.with_totals(rows);
         }
 
-        self.display_rows_with_filter(filter_text)
+        self.with_totals(self.display_rows_with_filter(filter_text))
     }
 
     fn display_rows_without_filter(&self, current_directory: Option<&Path>) -> Vec<DisplayRow> {
@@ -209,6 +233,48 @@ impl DashboardSnapshot {
 
         display_rows
     }
+}
+
+impl DashboardSummary {
+    pub fn totals_label(&self) -> String {
+        format!(
+            "{} sessions  {} running  {}",
+            self.filtered_sessions,
+            self.filtered_running,
+            format_memory(self.filtered_memory_bytes)
+        )
+    }
+}
+
+impl DashboardSnapshot {
+    fn with_totals(&self, rows: Vec<DisplayRow>) -> Vec<DisplayRow> {
+        rows
+    }
+
+    pub fn totals_for_rows(&self, rows: &[DisplayRow]) -> DashboardSummary {
+        let mut summary = self.summary.clone();
+        summary.filtered_sessions = 0;
+        summary.filtered_running = 0;
+        summary.filtered_memory_bytes = 0;
+
+        for row in rows.iter().filter_map(DisplayRow::session) {
+            summary.filtered_sessions += 1;
+            if row.is_running() {
+                summary.filtered_running += 1;
+            }
+            summary.filtered_memory_bytes += row.memory_bytes.unwrap_or(0);
+        }
+
+        summary
+    }
+}
+
+fn format_memory(bytes: u64) -> String {
+    if bytes == 0 {
+        return String::from("0 MiB");
+    }
+
+    format!("{} MiB", bytes / 1024 / 1024)
 }
 
 fn append_group(

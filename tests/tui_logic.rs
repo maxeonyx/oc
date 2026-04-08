@@ -199,6 +199,7 @@ fn session_entry(
             opencode_args: Vec::new(),
         },
         status,
+        runtime: None,
     }
 }
 

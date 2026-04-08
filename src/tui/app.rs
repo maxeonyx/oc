@@ -154,6 +154,10 @@ impl DashboardState {
         self.display_rows.get(self.selected_index)
     }
 
+    pub fn totals(&self) -> super::model::DashboardSummary {
+        self.snapshot.totals_for_rows(&self.display_rows)
+    }
+
     pub fn selected_session_id(&self) -> Option<i64> {
         self.selected_row()
             .and_then(DisplayRow::session)

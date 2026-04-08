@@ -52,6 +52,8 @@ pub enum SessionStatus {
 pub struct ManagedSessionRuntime {
     pub tmux_session_name: String,
     pub attached_count: usize,
+    pub pane_pid: Option<u32>,
+    pub memory_bytes: Option<u64>,
 }
 
 impl SessionStatus {
@@ -68,6 +70,7 @@ impl SessionStatus {
 pub struct SessionListEntry {
     pub saved_session: SavedSession,
     pub status: SessionStatus,
+    pub runtime: Option<ManagedSessionRuntime>,
 }
 
 impl SessionListEntry {
@@ -84,6 +87,7 @@ impl SessionListEntry {
         Self {
             saved_session,
             status,
+            runtime: runtime.cloned(),
         }
     }
 
@@ -95,6 +99,12 @@ impl SessionListEntry {
             self.saved_session.directory.display(),
             self.status.as_str()
         )
+    }
+
+    pub fn runtime_memory_bytes(&self) -> Option<u64> {
+        self.runtime
+            .as_ref()
+            .and_then(|runtime| runtime.memory_bytes)
     }
 }
 
