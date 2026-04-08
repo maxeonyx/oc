@@ -3,7 +3,9 @@
 use assert_cmd::Command;
 use rand::Rng;
 use std::env;
+use std::ffi::OsString;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -97,6 +99,21 @@ fn run_tmux_output(args: &[&str], description: &str) -> Output {
         .args(args)
         .output()
         .unwrap_or_else(|error| panic!("Failed to {}: {}", description, error))
+}
+
+fn run_tmux_success(args: &[&str], description: &str) -> Output {
+    let output = run_tmux_output(args, description);
+
+    if !output.status.success() {
+        panic!(
+            "Failed to {}\nstdout:\n{}\nstderr:\n{}",
+            description,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    output
 }
 
 pub fn create_tmux_session(session_name: &str) {
@@ -221,12 +238,81 @@ pub fn wait_for_file_contains(path: &Path, needle: &str, timeout: Duration) -> S
     )
 }
 
+pub fn wait_for_file_exists(path: &Path, timeout: Duration) {
+    let description = format!("file {} to exist", path.display());
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let exists = path.exists();
+        let observed = format!("path {} exists: {}", path.display(), exists);
+
+        if exists {
+            WaitStatus::ready((), observed)
+        } else {
+            WaitStatus::pending(observed)
+        }
+    });
+}
+
+pub fn tmux_pane_current_command(session_name: &str) -> String {
+    let output = run_tmux_success(
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            session_name,
+            "#{pane_current_command}",
+        ],
+        "read tmux pane current command",
+    );
+
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+pub fn tmux_pane_pid(session_name: &str) -> u32 {
+    let output = run_tmux_success(
+        &["display-message", "-p", "-t", session_name, "#{pane_pid}"],
+        "read tmux pane pid",
+    );
+
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .unwrap_or_else(|error| panic!("Failed to parse tmux pane pid: {}", error))
+}
+
+pub fn detach_tmux_client_from_session(session_name: &str) {
+    let output = run_tmux_output(
+        &["detach-client", "-s", session_name],
+        "detach tmux client from session",
+    );
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        if stderr.contains("no current client") || stderr.contains("can't find client") {
+            return;
+        }
+
+        panic!(
+            "Failed to detach tmux client from session {}\nstdout:\n{}\nstderr:\n{}",
+            session_name,
+            String::from_utf8_lossy(&output.stdout),
+            stderr,
+        );
+    }
+}
+
 pub struct TestEnv {
     root_dir: PathBuf,
     aliases_file: PathBuf,
     opencode_db: PathBuf,
     tmux_scope_prefix: String,
     tmux_prefix: String,
+}
+
+pub struct FakeOpenCode {
+    bin_dir: PathBuf,
+    log_dir: PathBuf,
 }
 
 impl TestEnv {
@@ -283,6 +369,57 @@ impl TestEnv {
         cmd
     }
 
+    pub fn std_oc_cmd(&self) -> StdCommand {
+        let mut cmd = StdCommand::new(assert_cmd::cargo::cargo_bin("oc"));
+        cmd.env("OC_ALIASES_FILE", &self.aliases_file)
+            .env("OC_TMUX_PREFIX", &self.tmux_prefix)
+            .env("OC_OPENCODE_DB", &self.opencode_db);
+        cmd
+    }
+
+    pub fn install_fake_opencode(&self) -> FakeOpenCode {
+        let bin_dir = self.root_dir.join("bin");
+        let log_dir = self.root_dir.join("fake-opencode-log");
+
+        fs::create_dir_all(&bin_dir)
+            .unwrap_or_else(|error| panic!("Failed to create {}: {}", bin_dir.display(), error));
+        fs::create_dir_all(&log_dir)
+            .unwrap_or_else(|error| panic!("Failed to create {}: {}", log_dir.display(), error));
+
+        let script_path = bin_dir.join("opencode");
+        fs::write(
+            &script_path,
+            "#!/bin/sh
+set -eu
+log_dir=\"${OC_FAKE_OPENCODE_LOG_DIR:?}\"
+pwd >\"$log_dir/cwd.txt\"
+printf '%s\n' \"$@\" >\"$log_dir/args.txt\"
+printf '%s\n' \"$$\" >\"$log_dir/pid.txt\"
+printf 'START\n' >>\"$log_dir/events.txt\"
+trap 'printf \"INT\\n\" >>\"$log_dir/events.txt\"' INT
+while IFS= read -r line; do
+    printf 'LINE:%s\n' \"$line\" >>\"$log_dir/events.txt\"
+done
+printf 'EOF\n' >>\"$log_dir/events.txt\"
+",
+        )
+        .unwrap_or_else(|error| panic!("Failed to write {}: {}", script_path.display(), error));
+
+        let mut permissions = fs::metadata(&script_path)
+            .unwrap_or_else(|error| panic!("Failed to stat {}: {}", script_path.display(), error))
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions).unwrap_or_else(|error| {
+            panic!(
+                "Failed to set executable permissions on {}: {}",
+                script_path.display(),
+                error
+            )
+        });
+
+        FakeOpenCode { bin_dir, log_dir }
+    }
+
     pub fn list_tmux_sessions(&self) -> Vec<String> {
         list_tmux_sessions_with_prefix(&self.tmux_scope_prefix)
     }
@@ -303,6 +440,40 @@ impl TestEnv {
     }
 }
 
+impl FakeOpenCode {
+    pub fn log_dir(&self) -> &Path {
+        &self.log_dir
+    }
+
+    pub fn cwd_log_path(&self) -> PathBuf {
+        self.log_dir.join("cwd.txt")
+    }
+
+    pub fn args_log_path(&self) -> PathBuf {
+        self.log_dir.join("args.txt")
+    }
+
+    pub fn pid_log_path(&self) -> PathBuf {
+        self.log_dir.join("pid.txt")
+    }
+
+    pub fn events_log_path(&self) -> PathBuf {
+        self.log_dir.join("events.txt")
+    }
+
+    pub fn apply_to_command(&self, command: &mut StdCommand) {
+        command
+            .env("PATH", prepend_path(&self.bin_dir))
+            .env("OC_FAKE_OPENCODE_LOG_DIR", &self.log_dir);
+    }
+
+    pub fn apply_to_assert_cmd(&self, command: &mut Command) {
+        command
+            .env("PATH", prepend_path(&self.bin_dir))
+            .env("OC_FAKE_OPENCODE_LOG_DIR", &self.log_dir);
+    }
+}
+
 impl Drop for TestEnv {
     fn drop(&mut self) {
         cleanup_tmux_sessions_with_prefix(&self.tmux_scope_prefix);
@@ -312,6 +483,17 @@ impl Drop for TestEnv {
 
 pub fn oc_cmd() -> Command {
     Command::cargo_bin("oc").expect("oc binary should build for tests")
+}
+
+fn prepend_path(prefix_dir: &Path) -> OsString {
+    let mut path_entries = Vec::new();
+    path_entries.push(prefix_dir.to_path_buf());
+
+    if let Some(existing_path) = env::var_os("PATH") {
+        path_entries.extend(env::split_paths(&existing_path));
+    }
+
+    env::join_paths(path_entries).expect("PATH entries should be joinable")
 }
 
 fn tmux_scope_prefix(scope_name: &str) -> String {

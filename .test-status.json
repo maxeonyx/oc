@@ -13,6 +13,16 @@
     "oc::harness_foundation$test_env_drop_cleans_up_tmux_sessions": "passing",
     "oc::harness_foundation$test_env_injects_runtime_overrides_into_oc": "passing",
     "oc::harness_foundation$wait_for_file_contains_observes_eventual_file_content": "passing",
+    "oc::session_cli$new_creates_alias_launches_tmux_session_and_attaches": "pending",
+    "oc::session_cli$new_rejects_duplicate_name_without_creating_second_tmux_session": "pending",
+    "oc::session_cli$new_rejects_missing_directory": "pending",
+    "oc::session_cli$new_uses_explicit_dir_and_args_when_launching_tmux_session": "pending",
+    "oc::session_cli$rm_fails_cleanly_when_target_not_found": "pending",
+    "oc::session_cli$rm_removes_alias_and_kills_running_tmux_session_by_name": "pending",
+    "oc::session_cli$rm_removes_alias_and_kills_running_tmux_session_by_numeric_id": "pending",
+    "oc::session_cli$stop_accepts_numeric_id": "pending",
+    "oc::session_cli$stop_fails_cleanly_when_target_not_found": "pending",
+    "oc::session_cli$stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias": "pending",
     "oc::version_smoke$version_flag_prints_package_version": "passing"
   }
 }
