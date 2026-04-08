@@ -22,6 +22,13 @@ pub enum RequestedAction {
     Stop {
         target: String,
     },
+    Restart {
+        target: String,
+    },
+    Move {
+        target: String,
+        new_dir: PathBuf,
+    },
     AttachTarget {
         target: String,
     },
@@ -73,6 +80,10 @@ impl Cli {
             (Some(Command::Unalias { name }), None) => RequestedAction::Unalias { name },
             (Some(Command::Rm { target }), None) => RequestedAction::Rm { target },
             (Some(Command::Stop { target }), None) => RequestedAction::Stop { target },
+            (Some(Command::Restart { target }), None) => RequestedAction::Restart { target },
+            (Some(Command::Move { target, new_dir }), None) => {
+                RequestedAction::Move { target, new_dir }
+            }
             (Some(Command::DumpSessionList), None) => RequestedAction::DumpSessionList,
             (Some(Command::DumpRuntimeConfig), None) => RequestedAction::DumpRuntimeConfig,
             (None, Some(target)) => RequestedAction::AttachTarget { target },
@@ -108,6 +119,14 @@ pub enum Command {
     },
     Stop {
         target: String,
+    },
+    Restart {
+        target: String,
+    },
+    #[command(name = "mv")]
+    Move {
+        target: String,
+        new_dir: PathBuf,
     },
     #[command(name = "__dump-session-list", hide = true)]
     DumpSessionList,

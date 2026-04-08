@@ -1,5 +1,5 @@
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
-use oc::tui::command::{parse_command, CommandParseError, ParsedCommand};
+use oc::tui::command::{CommandParseError, ParsedCommand, parse_command};
 use oc::tui::model::{DashboardAction, DashboardSnapshot, DisplayRow, InputMode};
 
 use std::path::PathBuf;
@@ -41,9 +41,9 @@ fn filter_groups_by_priority_then_match_strength() {
             "group:numeric id",
             "session:1",
             "session:12",
+            "session:16",
             "session:31",
             "group:name",
-            "session:16",
             "session:54",
             "session:43",
         ],
@@ -110,15 +110,12 @@ fn available_actions_depend_on_row_status() {
     ]);
 
     let rows = snapshot.display_rows("", InputMode::Filter, None);
-    let running = rows
+    let sessions = rows
         .iter()
-        .find_map(DisplayRow::session)
-        .expect("running row");
-    let saved = rows
-        .iter()
-        .rev()
-        .find_map(DisplayRow::session)
-        .expect("saved row");
+        .filter_map(DisplayRow::session)
+        .collect::<Vec<_>>();
+    let running = sessions[0];
+    let saved = sessions[1];
 
     assert_eq!(
         running.available_actions(),

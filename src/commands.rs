@@ -19,6 +19,8 @@ pub fn run(service: &SessionService, action: RequestedAction) -> Result<()> {
         RequestedAction::Unalias { name } => service.remove_alias(&name),
         RequestedAction::Rm { target } => service.remove_session(&target),
         RequestedAction::Stop { target } => service.stop_session(&target),
+        RequestedAction::Restart { target } => service.restart_session(&target),
+        RequestedAction::Move { target, new_dir } => service.move_session(&target, new_dir),
         RequestedAction::AttachTarget { target } => service.activate_target(&target),
         RequestedAction::Default => {
             if service.auto_attach_directory_match()? {

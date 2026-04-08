@@ -79,6 +79,24 @@ impl SessionStore {
         }
     }
 
+    pub fn update_directory(&mut self, name: &str, directory: &Path) -> Result<()> {
+        let updated_rows = self
+            .connection
+            .execute(
+                "UPDATE sessions SET directory = ?1 WHERE name = ?2",
+                params![directory.display().to_string(), name],
+            )
+            .with_context(|| {
+                format!("failed to update directory for session alias '{name}' in storage")
+            })?;
+
+        if updated_rows == 0 {
+            bail!("Session alias '{name}' not found");
+        }
+
+        Ok(())
+    }
+
     pub fn list_saved_sessions(&self) -> Result<Vec<SavedSession>> {
         let mut statement = self
             .connection

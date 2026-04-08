@@ -105,6 +105,23 @@ impl Tmux {
         Ok(())
     }
 
+    pub fn restart_session(
+        &self,
+        session_name: &str,
+        directory: &Path,
+        opencode_args: &[String],
+    ) -> Result<()> {
+        self.graceful_stop(session_name)?;
+
+        wait_for_session_exit(session_name, std::time::Duration::from_secs(10))?;
+
+        self.launch_opencode_session(session_name, directory, opencode_args)?;
+        std::thread::sleep(std::time::Duration::from_secs(10));
+        self.send_keys(session_name, &["continue", "Enter"])?;
+
+        Ok(())
+    }
+
     pub fn list_managed_sessions(&self) -> Result<Vec<ManagedSessionRuntime>> {
         let output = Command::new("tmux")
             .args([
@@ -177,6 +194,33 @@ fn run_tmux_checked(mut command: Command, description: String) -> Result<Output>
     }
 
     Ok(output)
+}
+
+fn wait_for_session_exit(session_name: &str, timeout: std::time::Duration) -> Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+
+    while std::time::Instant::now() < deadline {
+        let output = Command::new("tmux")
+            .arg("has-session")
+            .arg("-t")
+            .arg(session_name)
+            .output()
+            .with_context(|| {
+                format!("failed to check whether tmux session '{session_name}' still exists")
+            })?;
+
+        if output.status.success() {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            continue;
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if is_tmux_missing_session_error(&stderr) || is_tmux_server_unavailable_error(&stderr) {
+            return Ok(());
+        }
+    }
+
+    bail!("Session '{session_name}' did not stop before restart timeout")
 }
 
 fn current_environment_args() -> Vec<OsString> {

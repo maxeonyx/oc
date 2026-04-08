@@ -125,6 +125,49 @@ impl SessionService {
         })
     }
 
+    pub fn restart_session(&self, target: &str) -> Result<()> {
+        let saved_session = self.resolve_session_ref(target)?;
+        let opencode_session_id = saved_session.opencode_session_id.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Session '{}' cannot be restarted because it has no saved OpenCode session ID",
+                saved_session.name
+            )
+        })?;
+
+        let tmux = self.open_tmux();
+        let tmux_session_name = tmux.managed_session_name(&saved_session.name);
+        let mut opencode_args = saved_session.opencode_args.clone();
+        opencode_args.splice(
+            0..0,
+            [String::from("--session"), opencode_session_id.clone()],
+        );
+
+        tmux.restart_session(&tmux_session_name, &saved_session.directory, &opencode_args)
+            .with_context(|| format!("failed to restart session '{}'", saved_session.name))
+    }
+
+    pub fn move_session(&self, target: &str, new_dir: PathBuf) -> Result<()> {
+        let saved_session = self.resolve_session_ref(target)?;
+        let new_directory = resolve_new_directory(Some(new_dir))?;
+        let tmux = self.open_tmux();
+        let tmux_session_name = tmux.managed_session_name(&saved_session.name);
+
+        if tmux.session_exists(&tmux_session_name)? {
+            anyhow::bail!(
+                "Session '{}' must be stopped before moving its directory",
+                saved_session.name
+            );
+        }
+
+        let mut store = self.open_session_store()?;
+        store
+            .update_directory(&saved_session.name, &new_directory)
+            .with_context(|| format!("failed to move session '{}'", saved_session.name))?;
+
+        let updated_session = self.resolve_session_ref(&saved_session.name)?;
+        self.activate_session(&updated_session)
+    }
+
     pub fn auto_attach_directory_match(&self) -> Result<bool> {
         match self.current_directory_matches()?.as_slice() {
             [saved_session] => {
@@ -171,7 +214,7 @@ impl SessionService {
             tmux.launch_opencode_session(
                 &tmux_session_name,
                 &saved_session.directory,
-                &saved_session.opencode_args,
+                &launch_opencode_args(saved_session),
             )
             .with_context(|| format!("failed to launch session '{}'", saved_session.name))?;
         }
@@ -185,6 +228,15 @@ impl SessionService {
         tmux.attach_session(&tmux_session_name)
             .with_context(|| format!("failed to attach to session '{}'", saved_session.name))
     }
+}
+
+fn launch_opencode_args(saved_session: &SavedSession) -> Vec<String> {
+    let mut args = saved_session.opencode_args.clone();
+    if let Some(session_id) = &saved_session.opencode_session_id {
+        args.splice(0..0, [String::from("--session"), session_id.clone()]);
+    }
+
+    args
 }
 
 fn resolve_alias_directory(dir: Option<PathBuf>) -> Result<PathBuf> {
