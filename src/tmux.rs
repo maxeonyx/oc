@@ -20,26 +20,16 @@ impl Tmux {
         format!("{}{}", self.prefix, name)
     }
 
-    pub fn create_detached_session(
+    pub fn launch_opencode_session(
         &self,
         session_name: &str,
         directory: &Path,
         opencode_args: &[String],
     ) -> Result<()> {
-        let mut command = Command::new("tmux");
-        command
-            .arg("new-session")
-            .arg("-d")
-            .arg("-s")
-            .arg(session_name)
-            .arg("-c")
-            .arg(directory)
-            .arg("env")
-            .args(current_environment_args())
-            .arg("opencode")
-            .args(opencode_args);
-
-        run_tmux_checked(command, format!("create tmux session '{session_name}'"))?;
+        run_tmux_checked(
+            new_session_command(session_name, directory, opencode_args),
+            format!("start tmux session '{session_name}'"),
+        )?;
 
         Ok(())
     }
@@ -101,19 +91,22 @@ impl Tmux {
             bail!("Session '{session_name}' is not running in tmux");
         }
 
-        self.send_keys(session_name, &["C-c"])?;
+        self.send_keys_if_running(session_name, &["C-c"])?;
+        self.send_keys_if_running(session_name, &["C-d"])?;
 
+        Ok(())
+    }
+
+    fn send_keys_if_running(&self, session_name: &str, keys: &[&str]) -> Result<()> {
         if !self.session_exists(session_name)? {
             return Ok(());
         }
 
-        match self.send_keys(session_name, &["C-d"]) {
+        match self.send_keys(session_name, keys) {
             Ok(()) => Ok(()),
             Err(_error) if !self.session_exists(session_name)? => Ok(()),
             Err(error) => Err(error),
-        }?;
-
-        Ok(())
+        }
     }
 
     fn send_keys(&self, session_name: &str, keys: &[&str]) -> Result<()> {
@@ -159,4 +152,21 @@ fn current_environment_args() -> Vec<OsString> {
             assignment
         })
         .collect()
+}
+
+fn new_session_command(session_name: &str, directory: &Path, opencode_args: &[String]) -> Command {
+    let mut command = Command::new("tmux");
+    command
+        .arg("new-session")
+        .arg("-d")
+        .arg("-s")
+        .arg(session_name)
+        .arg("-c")
+        .arg(directory)
+        .arg("env")
+        .args(current_environment_args())
+        .arg("opencode")
+        .args(opencode_args);
+
+    command
 }

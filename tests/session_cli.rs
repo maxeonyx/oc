@@ -3,13 +3,13 @@ mod common;
 use common::{
     FakeOpenCode, TestEnv, detach_tmux_client_from_session, tmux_pane_current_command,
     tmux_pane_pid, wait_for_file_contains, wait_for_file_exists,
+    wait_for_tmux_client_detach_window,
 };
 use predicates::prelude::*;
 use rusqlite::{Connection, OpenFlags, params};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::thread;
 use std::time::Duration;
 
 const EMPTY_ARGS_JSON: &str = "[]";
@@ -86,9 +86,32 @@ fn spawn_new_command(
         .expect("oc new should spawn")
 }
 
-fn wait_for_attach_and_detach(session_name: &str) {
-    thread::sleep(Duration::from_millis(500));
+fn allow_new_command_to_settle(session_name: &str) {
+    wait_for_tmux_client_detach_window();
     detach_tmux_client_from_session(session_name);
+}
+
+fn run_new_command_and_wait(
+    env: &TestEnv,
+    fake_opencode: &FakeOpenCode,
+    session_name: &str,
+    args: &[&str],
+) {
+    let mut child = spawn_new_command(env, fake_opencode, args);
+
+    env.wait_for_tmux_session_exists(session_name);
+    allow_new_command_to_settle(session_name);
+
+    let status = child
+        .wait()
+        .expect("oc new process should exit after attach handling completes");
+    assert!(status.success(), "Expected oc new to exit successfully");
+}
+
+fn launch_saved_session(env: &TestEnv, fake_opencode: &FakeOpenCode, name: &str) -> String {
+    let session_name = managed_tmux_session_name(env, name);
+    run_new_command_and_wait(env, fake_opencode, &session_name, &["new", name]);
+    session_name
 }
 
 #[test]
@@ -97,16 +120,8 @@ fn new_creates_alias_launches_tmux_session_and_attaches() {
     let fake_opencode = env.install_fake_opencode();
     let session_name = managed_tmux_session_name(&env, "worktree");
 
-    let mut child = spawn_new_command(&env, &fake_opencode, &["new", "worktree"]);
-
-    env.wait_for_tmux_session_exists(&session_name);
+    run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "worktree"]);
     wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
-    wait_for_attach_and_detach(&session_name);
-
-    let status = child
-        .wait()
-        .expect("oc new process should exit after detach");
-    assert!(status.success(), "Expected oc new to exit successfully");
 
     assert_saved_sessions(
         &env,
@@ -132,9 +147,10 @@ fn new_uses_explicit_dir_and_args_when_launching_tmux_session() {
     fs::create_dir_all(&project_dir).expect("test should create explicit project directory");
     let session_name = managed_tmux_session_name(&env, "dc");
 
-    let mut child = spawn_new_command(
+    run_new_command_and_wait(
         &env,
         &fake_opencode,
+        &session_name,
         &[
             "new",
             "dc",
@@ -147,14 +163,7 @@ fn new_uses_explicit_dir_and_args_when_launching_tmux_session() {
         ],
     );
 
-    env.wait_for_tmux_session_exists(&session_name);
     wait_for_file_exists(&fake_opencode.args_log_path(), Duration::from_secs(5));
-    wait_for_attach_and_detach(&session_name);
-
-    let status = child
-        .wait()
-        .expect("oc new process should exit after detach");
-    assert!(status.success(), "Expected oc new to exit successfully");
 
     assert_saved_sessions(
         &env,
@@ -197,13 +206,7 @@ fn new_rejects_missing_directory() {
 fn new_rejects_duplicate_name_without_creating_second_tmux_session() {
     let env = TestEnv::new("new-rejects-duplicate-name");
     let fake_opencode = env.install_fake_opencode();
-    let session_name = managed_tmux_session_name(&env, "dc");
-
-    let mut first_child = spawn_new_command(&env, &fake_opencode, &["new", "dc"]);
-    env.wait_for_tmux_session_exists(&session_name);
-    wait_for_attach_and_detach(&session_name);
-    let first_status = first_child.wait().expect("first oc new should exit");
-    assert!(first_status.success());
+    let session_name = launch_saved_session(&env, &fake_opencode, "dc");
 
     let mut duplicate_command = env.oc_cmd();
     fake_opencode.apply_to_assert_cmd(&mut duplicate_command);
@@ -225,13 +228,7 @@ fn new_rejects_duplicate_name_without_creating_second_tmux_session() {
 fn rm_removes_alias_and_kills_running_tmux_session_by_name() {
     let env = TestEnv::new("rm-by-name");
     let fake_opencode = env.install_fake_opencode();
-    let session_name = managed_tmux_session_name(&env, "dc");
-
-    let mut child = spawn_new_command(&env, &fake_opencode, &["new", "dc"]);
-    env.wait_for_tmux_session_exists(&session_name);
-    wait_for_attach_and_detach(&session_name);
-    let status = child.wait().expect("oc new should exit");
-    assert!(status.success());
+    let session_name = launch_saved_session(&env, &fake_opencode, "dc");
 
     env.oc_cmd().args(["rm", "dc"]).assert().success();
     env.wait_for_tmux_session_absent(&session_name);
@@ -243,17 +240,8 @@ fn rm_removes_alias_and_kills_running_tmux_session_by_numeric_id() {
     let env = TestEnv::new("rm-by-id");
     let fake_opencode = env.install_fake_opencode();
 
-    let mut one = spawn_new_command(&env, &fake_opencode, &["new", "one"]);
-    let session_one = managed_tmux_session_name(&env, "one");
-    env.wait_for_tmux_session_exists(&session_one);
-    wait_for_attach_and_detach(&session_one);
-    assert!(one.wait().expect("first oc new should exit").success());
-
-    let mut two = spawn_new_command(&env, &fake_opencode, &["new", "two"]);
-    let session_two = managed_tmux_session_name(&env, "two");
-    env.wait_for_tmux_session_exists(&session_two);
-    wait_for_attach_and_detach(&session_two);
-    assert!(two.wait().expect("second oc new should exit").success());
+    let session_one = launch_saved_session(&env, &fake_opencode, "one");
+    let session_two = launch_saved_session(&env, &fake_opencode, "two");
 
     env.oc_cmd().args(["rm", "1"]).assert().success();
     env.wait_for_tmux_session_absent(&session_one);
@@ -280,12 +268,7 @@ fn rm_fails_cleanly_when_target_not_found() {
 fn stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias() {
     let env = TestEnv::new("stop-graceful-shutdown");
     let fake_opencode = env.install_fake_opencode();
-    let session_name = managed_tmux_session_name(&env, "dc");
-
-    let mut child = spawn_new_command(&env, &fake_opencode, &["new", "dc"]);
-    env.wait_for_tmux_session_exists(&session_name);
-    wait_for_attach_and_detach(&session_name);
-    assert!(child.wait().expect("oc new should exit").success());
+    let session_name = launch_saved_session(&env, &fake_opencode, "dc");
 
     env.oc_cmd().args(["stop", "dc"]).assert().success();
     env.wait_for_tmux_session_absent(&session_name);
@@ -313,12 +296,7 @@ fn stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias() {
 fn stop_accepts_numeric_id() {
     let env = TestEnv::new("stop-by-id");
     let fake_opencode = env.install_fake_opencode();
-    let session_name = managed_tmux_session_name(&env, "dc");
-
-    let mut child = spawn_new_command(&env, &fake_opencode, &["new", "dc"]);
-    env.wait_for_tmux_session_exists(&session_name);
-    wait_for_attach_and_detach(&session_name);
-    assert!(child.wait().expect("oc new should exit").success());
+    let session_name = launch_saved_session(&env, &fake_opencode, "dc");
 
     env.oc_cmd().args(["stop", "1"]).assert().success();
     env.wait_for_tmux_session_absent(&session_name);

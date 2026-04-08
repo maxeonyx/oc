@@ -306,6 +306,10 @@ pub fn detach_tmux_client_from_session(session_name: &str) {
     }
 }
 
+pub fn wait_for_tmux_client_detach_window() {
+    thread::sleep(Duration::from_millis(500));
+}
+
 pub struct TestEnv {
     root_dir: PathBuf,
     aliases_file: PathBuf,
