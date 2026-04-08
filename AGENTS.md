@@ -23,7 +23,7 @@ Shared test helpers live in `tests/common/mod.rs`. Use the `TestEnv` harness the
 
 The binary supports test-only environment overrides for isolation:
 
-- `OC_ALIASES_FILE`
+- `OC_ALIASES_FILE` — path to the SQLite database (legacy name from the old flat-file era; now points to the `.db` file, default `~/.config/oc/oc.db`)
 - `OC_TMUX_PREFIX`
 - `OC_OPENCODE_DB`
 
