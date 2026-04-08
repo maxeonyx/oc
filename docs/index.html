@@ -260,7 +260,7 @@
 
     <div class="codeblock" id="skill-install-block"><span class="cmd">mkdir</span> -p ~/.config/opencode/skills/oc
 <span class="cmd">curl</span> -sLo ~/.config/opencode/skills/oc/SKILL.md \
-     <span class="str">https://maxeonyx.github.io/oc/SKILL.md</span><button class="copy-btn" onclick="copySkillInstall()">Copy</button></div>
+     <span class="str">https://oc.maxeonyx.com/SKILL.md</span><button class="copy-btn" onclick="copySkillInstall()">Copy</button></div>
 
     <div class="skill-block"><span class="comment">---</span>
 <span class="key">name:</span> <span class="str">oc</span>
@@ -305,7 +305,7 @@ chmod +x ~/.local/bin/oc`;
     function copySkillInstall() {
       const text = `mkdir -p ~/.config/opencode/skills/oc
 curl -sLo ~/.config/opencode/skills/oc/SKILL.md \
-     https://maxeonyx.github.io/oc/SKILL.md`;
+     https://oc.maxeonyx.com/SKILL.md`;
       navigator.clipboard.writeText(text);
       event.target.textContent = 'Copied!';
       setTimeout(() => event.target.textContent = 'Copy', 1500);
