@@ -8,9 +8,11 @@ repository = "https://github.com/maxeonyx/oc"
 readme = "README.md"
 
 [dependencies]
+anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.28"
 ratatui = "0.29"
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [dev-dependencies]
 assert_cmd = "2"
