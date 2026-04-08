@@ -65,9 +65,20 @@ pub fn is_selectable_row(row: &DisplayRow) -> bool {
 
 fn default_selected_identity(
     display_rows: &[DisplayRow],
-    _current_directory: Option<&std::path::Path>,
+    current_directory: Option<&std::path::Path>,
 ) -> Option<SelectedIdentity> {
-    display_rows.iter().rev().find_map(|row| match row {
+    if let Some(current_directory) = current_directory {
+        for row in display_rows {
+            match row {
+                DisplayRow::Session(session) if session.full_directory == current_directory => {
+                    return Some(SelectedIdentity::Session(session.session_id));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    display_rows.iter().find_map(|row| match row {
         DisplayRow::NewSession => Some(SelectedIdentity::NewSession),
         DisplayRow::Session(session) => Some(SelectedIdentity::Session(session.session_id)),
         _ => None,

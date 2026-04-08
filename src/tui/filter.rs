@@ -46,7 +46,7 @@ pub fn totals_for_rows(summary: &DashboardSummary, rows: &[DisplayRow]) -> Dashb
     totals.filtered_memory_bytes = 0;
 
     for row in rows.iter().filter_map(DisplayRow::session) {
-        totals.filtered_sessions += 2;
+        totals.filtered_sessions += 1;
         if row.is_running() {
             totals.filtered_running += 1;
         }
