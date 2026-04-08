@@ -3,7 +3,13 @@ use std::env;
 use std::ffi::OsString;
 use std::io::{IsTerminal, stdin, stdout};
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedTmuxSession {
+    pub session_name: String,
+    pub attached_count: usize,
+}
 
 pub struct Tmux {
     prefix: String,
@@ -35,14 +41,16 @@ impl Tmux {
     }
 
     pub fn attach_session(&self, session_name: &str) -> Result<()> {
-        if !stdin().is_terminal() || !stdout().is_terminal() {
+        if stdin().is_terminal() && stdout().is_terminal() {
+            let command = attach_session_command(session_name);
+            run_tmux_checked(command, format!("attach to tmux session '{session_name}'"))?;
             return Ok(());
         }
 
-        let mut command = Command::new("tmux");
-        command.arg("attach-session").arg("-t").arg(session_name);
-
-        run_tmux_checked(command, format!("attach to tmux session '{session_name}'"))?;
+        run_tmux_checked(
+            attach_session_with_pty_command(session_name),
+            format!("attach to tmux session '{session_name}'"),
+        )?;
 
         Ok(())
     }
@@ -95,6 +103,39 @@ impl Tmux {
         self.send_keys_if_running(session_name, &["C-d"])?;
 
         Ok(())
+    }
+
+    pub fn list_managed_sessions(&self) -> Result<Vec<ManagedTmuxSession>> {
+        let output = Command::new("tmux")
+            .args([
+                "list-sessions",
+                "-F",
+                "#{session_name}\t#{session_attached}",
+            ])
+            .output()
+            .context("failed to list tmux sessions")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("no server running")
+                || (stderr.contains("error connecting to")
+                    && stderr.contains("No such file or directory"))
+                || stderr.contains("server exited unexpectedly")
+            {
+                return Ok(Vec::new());
+            }
+
+            return Err(anyhow!(
+                "failed to list tmux sessions\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                stderr,
+            ));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| parse_managed_session_line(line, &self.prefix))
+            .collect())
     }
 
     fn send_keys_if_running(&self, session_name: &str, keys: &[&str]) -> Result<()> {
@@ -169,4 +210,36 @@ fn new_session_command(session_name: &str, directory: &Path, opencode_args: &[St
         .args(opencode_args);
 
     command
+}
+
+fn attach_session_command(session_name: &str) -> Command {
+    let mut command = Command::new("tmux");
+    command.arg("attach-session").arg("-t").arg(session_name);
+    command
+}
+
+fn attach_session_with_pty_command(session_name: &str) -> Command {
+    let mut command = Command::new("python3");
+    command
+        .arg("-c")
+        .arg(
+            "import os, pty, sys; pid, _ = pty.fork();\nif pid == 0: os.execvp('tmux', ['tmux', 'attach-session', '-t', sys.argv[1]]);\n_, status = os.waitpid(pid, 0); raise SystemExit(os.waitstatus_to_exitcode(status))",
+        )
+        .arg(session_name)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+fn parse_managed_session_line(line: &str, prefix: &str) -> Option<ManagedTmuxSession> {
+    let (session_name, attached_count) = line.split_once('\t')?;
+    if !session_name.starts_with(prefix) {
+        return None;
+    }
+
+    Some(ManagedTmuxSession {
+        session_name: String::from(session_name),
+        attached_count: attached_count.parse().ok()?,
+    })
 }

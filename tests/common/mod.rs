@@ -152,6 +152,7 @@ pub fn list_tmux_sessions_with_prefix(prefix: &str) -> Vec<String> {
         if stderr.contains("no server running")
             || (stderr.contains("error connecting to")
                 && stderr.contains("No such file or directory"))
+            || stderr.contains("server exited unexpectedly")
         {
             return Vec::new();
         }
@@ -307,7 +308,7 @@ pub fn detach_tmux_client_from_session(session_name: &str) {
 }
 
 pub fn tmux_session_attached_count(session_name: &str) -> usize {
-    let output = run_tmux_success(
+    let output = run_tmux_output(
         &[
             "list-sessions",
             "-F",
@@ -315,6 +316,23 @@ pub fn tmux_session_attached_count(session_name: &str) -> usize {
         ],
         "read tmux attached session count",
     );
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("no server running")
+            || (stderr.contains("error connecting to")
+                && stderr.contains("No such file or directory"))
+            || stderr.contains("server exited unexpectedly")
+        {
+            return 0;
+        }
+
+        panic!(
+            "Failed to read tmux attached session count\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            stderr
+        );
+    }
 
     String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -346,12 +364,12 @@ pub fn wait_for_tmux_session_attached(session_name: &str, timeout: Duration) {
 }
 
 pub fn spawn_tmux_attach_client(session_name: &str) -> Child {
-    StdCommand::new("script")
-        .args([
-            "-qec",
-            &format!("tmux attach-session -t {}", session_name),
-            "/dev/null",
-        ])
+    StdCommand::new("python3")
+        .arg("-c")
+        .arg(
+            "import os, pty, sys; pid, _ = pty.fork();\nif pid == 0: os.execvp('tmux', ['tmux', 'attach-session', '-t', sys.argv[1]]);\n_, status = os.waitpid(pid, 0); raise SystemExit(os.waitstatus_to_exitcode(status))",
+        )
+        .arg(session_name)
         .spawn()
         .unwrap_or_else(|error| {
             panic!(

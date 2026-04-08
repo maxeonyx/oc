@@ -35,6 +35,41 @@ pub enum SessionRef {
     Name(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionStatus {
+    RunningAttached,
+    RunningDetached,
+    Saved,
+}
+
+impl SessionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RunningAttached => "running_attached",
+            Self::RunningDetached => "running_detached",
+            Self::Saved => "saved",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionListEntry {
+    pub saved_session: SavedSession,
+    pub status: SessionStatus,
+}
+
+impl SessionListEntry {
+    pub fn debug_dump_line(&self) -> String {
+        format!(
+            "id={} name={} dir={} status={}",
+            self.saved_session.id,
+            self.saved_session.name,
+            self.saved_session.directory.display(),
+            self.status.as_str()
+        )
+    }
+}
+
 impl SessionRef {
     pub fn parse(input: &str) -> Result<Self> {
         match input.parse::<i64>() {

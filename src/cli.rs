@@ -10,6 +10,8 @@ use std::path::PathBuf;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -37,6 +39,8 @@ pub enum Command {
     Stop {
         target: String,
     },
+    #[command(name = "__dump-session-list", hide = true)]
+    DumpSessionList,
     #[command(name = "__dump-runtime-config", hide = true)]
     DumpRuntimeConfig,
 }

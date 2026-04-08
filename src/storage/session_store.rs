@@ -79,6 +79,25 @@ impl SessionStore {
         }
     }
 
+    pub fn list_saved_sessions(&self) -> Result<Vec<SavedSession>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "
+                SELECT id, name, directory, opencode_session_id, opencode_args
+                FROM sessions
+                ORDER BY id
+                ",
+            )
+            .context("failed to prepare saved session listing query")?;
+
+        statement
+            .query_map([], map_saved_session_row)
+            .context("failed to query saved sessions")?
+            .collect::<Result<Vec<_>, _>>()
+            .context("failed to decode saved session rows")
+    }
+
     fn find_by_id(&self, id: i64) -> Result<SavedSession> {
         self.connection
             .query_row(
