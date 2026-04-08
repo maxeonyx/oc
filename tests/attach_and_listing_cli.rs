@@ -1,9 +1,10 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session, read_saved_sessions,
-    saved_session_row, spawn_tmux_attach_client, tmux_session_attached_count, wait_for_file_exists,
-    wait_for_tmux_client_detach_window, wait_for_tmux_session_attached,
+    detach_tmux_client_from_session, read_saved_sessions, saved_session_row,
+    spawn_tmux_attach_client, tmux_session_attached_count, wait_for_file_exists,
+    wait_for_tmux_client_detach_window, wait_for_tmux_session_attached, FakeOpenCode,
+    SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use std::path::Path;
@@ -30,7 +31,7 @@ fn spawn_interactive_oc(
     command
         .args(args)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("oc command should spawn")
@@ -48,15 +49,17 @@ fn assert_interactive_oc_command_succeeds_after_detach(
     args: &[&str],
     session_name: &str,
 ) {
-    let mut child = spawn_interactive_oc(env, fake_opencode, args);
+    let child = spawn_interactive_oc(env, fake_opencode, args);
     detach_after_attach(session_name);
 
-    let status = child
-        .wait()
+    let output = child
+        .wait_with_output()
         .expect("interactive oc command should exit after detach");
     assert!(
-        status.success(),
-        "Expected interactive oc command to succeed"
+        output.status.success(),
+        "Expected interactive oc command to succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -66,17 +69,19 @@ fn assert_interactive_oc_command_launches_and_succeeds_after_detach(
     args: &[&str],
     session_name: &str,
 ) {
-    let mut child = spawn_interactive_oc(env, fake_opencode, args);
+    let child = spawn_interactive_oc(env, fake_opencode, args);
     env.wait_for_tmux_session_exists(session_name);
     wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
     detach_after_attach(session_name);
 
-    let status = child
-        .wait()
+    let output = child
+        .wait_with_output()
         .expect("interactive oc command should exit after detach");
     assert!(
-        status.success(),
-        "Expected interactive oc command to succeed"
+        output.status.success(),
+        "Expected interactive oc command to succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

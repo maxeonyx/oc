@@ -1,9 +1,9 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session, read_saved_sessions,
-    saved_session_row, tmux_pane_current_command, tmux_pane_pid, wait_for_file_contains,
-    wait_for_file_exists, wait_for_tmux_client_detach_window,
+    detach_tmux_client_from_session, read_saved_sessions, saved_session_row,
+    tmux_pane_current_command, tmux_pane_pid, wait_for_file_contains, wait_for_file_exists,
+    wait_for_tmux_client_detach_window, FakeOpenCode, SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -30,7 +30,7 @@ fn spawn_new_command(
     command
         .args(args)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("oc new should spawn")
@@ -47,15 +47,20 @@ fn run_new_command_and_wait(
     session_name: &str,
     args: &[&str],
 ) {
-    let mut child = spawn_new_command(env, fake_opencode, args);
+    let child = spawn_new_command(env, fake_opencode, args);
 
     env.wait_for_tmux_session_exists(session_name);
     allow_new_command_to_settle(session_name);
 
-    let status = child
-        .wait()
+    let output = child
+        .wait_with_output()
         .expect("oc new process should exit after attach handling completes");
-    assert!(status.success(), "Expected oc new to exit successfully");
+    assert!(
+        output.status.success(),
+        "Expected oc new to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn launch_saved_session(env: &TestEnv, fake_opencode: &FakeOpenCode, name: &str) -> String {

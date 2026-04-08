@@ -1,8 +1,8 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{IsTerminal, stdin, stdout};
+use std::io::{stdin, stdout, IsTerminal};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -271,6 +271,11 @@ fn attach_session_with_pty_command(session_name: &str) -> Command {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+
+    if env::var_os("TERM").is_none() {
+        command.env("TERM", "screen");
+    }
+
     command
 }
 

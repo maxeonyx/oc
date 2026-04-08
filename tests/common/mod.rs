@@ -2,7 +2,7 @@
 
 use assert_cmd::Command;
 use rand::Rng;
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{params, Connection, OpenFlags};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -363,19 +363,24 @@ pub fn wait_for_tmux_session_attached(session_name: &str, timeout: Duration) {
 }
 
 pub fn spawn_tmux_attach_client(session_name: &str) -> Child {
-    StdCommand::new("python3")
+    let mut command = StdCommand::new("python3");
+    command
         .arg("-c")
         .arg(
             "import os, pty, sys; pid, _ = pty.fork();\nif pid == 0: os.execvp('tmux', ['tmux', 'attach-session', '-t', sys.argv[1]]);\n_, status = os.waitpid(pid, 0); raise SystemExit(os.waitstatus_to_exitcode(status))",
         )
-        .arg(session_name)
-        .spawn()
-        .unwrap_or_else(|error| {
-            panic!(
-                "Failed to attach tmux client for {}: {}",
-                session_name, error
-            )
-        })
+        .arg(session_name);
+
+    if env::var_os("TERM").is_none() {
+        command.env("TERM", "screen");
+    }
+
+    command.spawn().unwrap_or_else(|error| {
+        panic!(
+            "Failed to attach tmux client for {}: {}",
+            session_name, error
+        )
+    })
 }
 
 pub fn wait_for_tmux_client_detach_window() {
