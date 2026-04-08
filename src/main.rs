@@ -3,6 +3,7 @@ mod cli;
 mod commands;
 mod config;
 mod session;
+mod session_list;
 mod storage;
 mod tmux;
 

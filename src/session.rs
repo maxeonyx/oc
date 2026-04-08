@@ -29,6 +29,12 @@ impl NewSessionAlias {
     }
 }
 
+impl SavedSession {
+    pub fn managed_tmux_session_name(&self, prefix: &str) -> String {
+        format!("{prefix}{}", self.name)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionRef {
     NumericId(i64),
@@ -40,6 +46,12 @@ pub enum SessionStatus {
     RunningAttached,
     RunningDetached,
     Saved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedSessionRuntime {
+    pub tmux_session_name: String,
+    pub attached_count: usize,
 }
 
 impl SessionStatus {
@@ -59,6 +71,22 @@ pub struct SessionListEntry {
 }
 
 impl SessionListEntry {
+    pub fn from_saved_session(
+        saved_session: SavedSession,
+        runtime: Option<&ManagedSessionRuntime>,
+    ) -> Self {
+        let status = match runtime {
+            Some(runtime) if runtime.attached_count > 0 => SessionStatus::RunningAttached,
+            Some(_) => SessionStatus::RunningDetached,
+            None => SessionStatus::Saved,
+        };
+
+        Self {
+            saved_session,
+            status,
+        }
+    }
+
     pub fn debug_dump_line(&self) -> String {
         format!(
             "id={} name={} dir={} status={}",

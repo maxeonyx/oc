@@ -5,11 +5,7 @@ use std::io::{IsTerminal, stdin, stdout};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagedTmuxSession {
-    pub session_name: String,
-    pub attached_count: usize,
-}
+use crate::session::ManagedSessionRuntime;
 
 pub struct Tmux {
     prefix: String,
@@ -24,6 +20,10 @@ impl Tmux {
 
     pub fn managed_session_name(&self, name: &str) -> String {
         format!("{}{}", self.prefix, name)
+    }
+
+    pub fn managed_session_prefix(&self) -> &str {
+        &self.prefix
     }
 
     pub fn launch_opencode_session(
@@ -70,7 +70,7 @@ impl Tmux {
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("can't find session") || stderr.contains("no server running") {
+        if is_tmux_missing_session_error(&stderr) || is_tmux_server_unavailable_error(&stderr) {
             return Ok(false);
         }
 
@@ -105,7 +105,7 @@ impl Tmux {
         Ok(())
     }
 
-    pub fn list_managed_sessions(&self) -> Result<Vec<ManagedTmuxSession>> {
+    pub fn list_managed_sessions(&self) -> Result<Vec<ManagedSessionRuntime>> {
         let output = Command::new("tmux")
             .args([
                 "list-sessions",
@@ -117,11 +117,7 @@ impl Tmux {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("no server running")
-                || (stderr.contains("error connecting to")
-                    && stderr.contains("No such file or directory"))
-                || stderr.contains("server exited unexpectedly")
-            {
+            if is_tmux_server_unavailable_error(&stderr) {
                 return Ok(Vec::new());
             }
 
@@ -232,14 +228,24 @@ fn attach_session_with_pty_command(session_name: &str) -> Command {
     command
 }
 
-fn parse_managed_session_line(line: &str, prefix: &str) -> Option<ManagedTmuxSession> {
+fn parse_managed_session_line(line: &str, prefix: &str) -> Option<ManagedSessionRuntime> {
     let (session_name, attached_count) = line.split_once('\t')?;
     if !session_name.starts_with(prefix) {
         return None;
     }
 
-    Some(ManagedTmuxSession {
-        session_name: String::from(session_name),
+    Some(ManagedSessionRuntime {
+        tmux_session_name: String::from(session_name),
         attached_count: attached_count.parse().ok()?,
     })
+}
+
+pub fn is_tmux_server_unavailable_error(stderr: &str) -> bool {
+    stderr.contains("no server running")
+        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
+        || stderr.contains("server exited unexpectedly")
+}
+
+fn is_tmux_missing_session_error(stderr: &str) -> bool {
+    stderr.contains("can't find session")
 }

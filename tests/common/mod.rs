@@ -149,11 +149,7 @@ pub fn list_tmux_sessions_with_prefix(prefix: &str) -> Vec<String> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        if stderr.contains("no server running")
-            || (stderr.contains("error connecting to")
-                && stderr.contains("No such file or directory"))
-            || stderr.contains("server exited unexpectedly")
-        {
+        if is_tmux_server_unavailable_error(&stderr) {
             return Vec::new();
         }
 
@@ -319,11 +315,7 @@ pub fn tmux_session_attached_count(session_name: &str) -> usize {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("no server running")
-            || (stderr.contains("error connecting to")
-                && stderr.contains("No such file or directory"))
-            || stderr.contains("server exited unexpectedly")
-        {
+        if is_tmux_server_unavailable_error(&stderr) {
             return 0;
         }
 
@@ -343,6 +335,12 @@ pub fn tmux_session_attached_count(session_name: &str) -> usize {
         .unwrap_or("0")
         .parse()
         .unwrap_or_else(|error| panic!("Failed to parse tmux attached count: {}", error))
+}
+
+fn is_tmux_server_unavailable_error(stderr: &str) -> bool {
+    stderr.contains("no server running")
+        || (stderr.contains("error connecting to") && stderr.contains("No such file or directory"))
+        || stderr.contains("server exited unexpectedly")
 }
 
 pub fn wait_for_tmux_session_attached(session_name: &str, timeout: Duration) {

@@ -91,6 +91,44 @@ fn detach_after_attach(session_name: &str) {
     detach_tmux_client_from_session(session_name);
 }
 
+fn assert_interactive_oc_command_succeeds_after_detach(
+    env: &TestEnv,
+    fake_opencode: &FakeOpenCode,
+    args: &[&str],
+    session_name: &str,
+) {
+    let mut child = spawn_interactive_oc(env, fake_opencode, args);
+    detach_after_attach(session_name);
+
+    let status = child
+        .wait()
+        .expect("interactive oc command should exit after detach");
+    assert!(
+        status.success(),
+        "Expected interactive oc command to succeed"
+    );
+}
+
+fn assert_interactive_oc_command_launches_and_succeeds_after_detach(
+    env: &TestEnv,
+    fake_opencode: &FakeOpenCode,
+    args: &[&str],
+    session_name: &str,
+) {
+    let mut child = spawn_interactive_oc(env, fake_opencode, args);
+    env.wait_for_tmux_session_exists(session_name);
+    wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
+    detach_after_attach(session_name);
+
+    let status = child
+        .wait()
+        .expect("interactive oc command should exit after detach");
+    assert!(
+        status.success(),
+        "Expected interactive oc command to succeed"
+    );
+}
+
 fn create_saved_alias(env: &TestEnv, name: &str, directory: Option<&Path>) {
     let mut command = env.oc_cmd();
     if let Some(directory) = directory {
@@ -110,13 +148,12 @@ fn create_saved_alias(env: &TestEnv, name: &str, directory: Option<&Path>) {
 
 fn launch_via_new(env: &TestEnv, fake_opencode: &FakeOpenCode, name: &str) {
     let session_name = managed_tmux_session_name(env, name);
-    let mut child = spawn_interactive_oc(env, fake_opencode, &["new", name]);
-
-    env.wait_for_tmux_session_exists(&session_name);
-    detach_after_attach(&session_name);
-
-    let status = child.wait().expect("oc new should exit after detach");
-    assert!(status.success(), "Expected oc new to exit successfully");
+    assert_interactive_oc_command_launches_and_succeeds_after_detach(
+        env,
+        fake_opencode,
+        &["new", name],
+        &session_name,
+    );
 }
 
 #[test]
@@ -127,11 +164,12 @@ fn bare_target_attaches_running_session_by_name() {
 
     launch_via_new(&env, &fake_opencode, "dc");
 
-    let mut child = spawn_interactive_oc(&env, &fake_opencode, &["dc"]);
-    detach_after_attach(&session_name);
-
-    let status = child.wait().expect("oc <name> should exit after detach");
-    assert!(status.success(), "Expected bare target attach to succeed");
+    assert_interactive_oc_command_succeeds_after_detach(
+        &env,
+        &fake_opencode,
+        &["dc"],
+        &session_name,
+    );
 }
 
 #[test]
@@ -142,13 +180,11 @@ fn bare_target_attaches_running_session_by_numeric_id() {
 
     launch_via_new(&env, &fake_opencode, "dc");
 
-    let mut child = spawn_interactive_oc(&env, &fake_opencode, &["1"]);
-    detach_after_attach(&session_name);
-
-    let status = child.wait().expect("oc <id> should exit after detach");
-    assert!(
-        status.success(),
-        "Expected bare numeric target attach to succeed"
+    assert_interactive_oc_command_succeeds_after_detach(
+        &env,
+        &fake_opencode,
+        &["1"],
+        &session_name,
     );
 }
 
@@ -160,15 +196,11 @@ fn bare_target_launches_saved_alias_by_name_when_tmux_session_is_missing() {
 
     create_saved_alias(&env, "dc", None);
 
-    let mut child = spawn_interactive_oc(&env, &fake_opencode, &["dc"]);
-    env.wait_for_tmux_session_exists(&session_name);
-    wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
-    detach_after_attach(&session_name);
-
-    let status = child.wait().expect("oc <name> should exit after detach");
-    assert!(
-        status.success(),
-        "Expected bare target launch+attach to succeed"
+    assert_interactive_oc_command_launches_and_succeeds_after_detach(
+        &env,
+        &fake_opencode,
+        &["dc"],
+        &session_name,
     );
     assert_saved_sessions(
         &env,
@@ -184,15 +216,11 @@ fn bare_target_launches_saved_alias_by_numeric_id_when_tmux_session_is_missing()
 
     create_saved_alias(&env, "dc", None);
 
-    let mut child = spawn_interactive_oc(&env, &fake_opencode, &["1"]);
-    env.wait_for_tmux_session_exists(&session_name);
-    wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
-    detach_after_attach(&session_name);
-
-    let status = child.wait().expect("oc <id> should exit after detach");
-    assert!(
-        status.success(),
-        "Expected bare numeric target launch+attach to succeed"
+    assert_interactive_oc_command_launches_and_succeeds_after_detach(
+        &env,
+        &fake_opencode,
+        &["1"],
+        &session_name,
     );
 }
 
@@ -204,15 +232,12 @@ fn no_arg_auto_attach_launches_single_directory_match() {
 
     create_saved_alias(&env, "dc", Some(env.root_dir()));
 
-    let mut child = spawn_interactive_oc(&env, &fake_opencode, &[]);
-    env.wait_for_tmux_session_exists(&session_name);
-    wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
-    detach_after_attach(&session_name);
-
-    let status = child
-        .wait()
-        .expect("oc with no args should exit after detach");
-    assert!(status.success(), "Expected auto-attach to succeed");
+    assert_interactive_oc_command_launches_and_succeeds_after_detach(
+        &env,
+        &fake_opencode,
+        &[],
+        &session_name,
+    );
 }
 
 #[test]
@@ -223,16 +248,17 @@ fn no_arg_auto_attach_attaches_single_running_directory_match() {
 
     launch_via_new(&env, &fake_opencode, "dc");
 
-    let mut child = spawn_interactive_oc(&env, &fake_opencode, &[]);
-    detach_after_attach(&session_name);
+    assert_interactive_oc_command_succeeds_after_detach(&env, &fake_opencode, &[], &session_name);
+}
 
-    let status = child
-        .wait()
-        .expect("oc with no args should exit after detach");
-    assert!(
-        status.success(),
-        "Expected auto-attach to running session to succeed"
-    );
+fn assert_hidden_session_dump_status(env: &TestEnv, expected_status: &str) {
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "status={expected_status}"
+        )));
 }
 
 #[test]
@@ -241,11 +267,7 @@ fn hidden_session_dump_reports_saved_only_session() {
 
     create_saved_alias(&env, "dc", None);
 
-    env.oc_cmd()
-        .args(["__dump-session-list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("status=saved"));
+    assert_hidden_session_dump_status(&env, "saved");
 }
 
 #[test]
@@ -255,11 +277,7 @@ fn hidden_session_dump_reports_running_detached_session() {
 
     launch_via_new(&env, &fake_opencode, "dc");
 
-    env.oc_cmd()
-        .args(["__dump-session-list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("status=running_detached"));
+    assert_hidden_session_dump_status(&env, "running_detached");
 }
 
 #[test]
@@ -273,11 +291,7 @@ fn hidden_session_dump_reports_running_attached_session() {
     let mut attached_client = spawn_tmux_attach_client(&session_name);
     wait_for_tmux_session_attached(&session_name, Duration::from_secs(5));
 
-    env.oc_cmd()
-        .args(["__dump-session-list"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("status=running_attached"));
+    assert_hidden_session_dump_status(&env, "running_attached");
 
     detach_tmux_client_from_session(&session_name);
     let status = attached_client
