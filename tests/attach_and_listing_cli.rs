@@ -1,10 +1,9 @@
 mod common;
 
 use common::{
-    detach_tmux_client_from_session, read_saved_sessions, saved_session_row,
-    spawn_tmux_attach_client, tmux_session_attached_count, wait_for_file_exists,
-    wait_for_tmux_client_detach_window, wait_for_tmux_session_attached, FakeOpenCode,
-    SavedSessionRow, TestEnv,
+    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session, read_saved_sessions,
+    saved_session_row, spawn_tmux_attach_client, tmux_session_attached_count, wait_for_file_exists,
+    wait_for_tmux_client_detach_window, wait_for_tmux_session_attached,
 };
 use predicates::prelude::*;
 use std::path::Path;

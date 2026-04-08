@@ -1,9 +1,9 @@
 mod common;
 
 use common::{
-    detach_tmux_client_from_session, read_saved_sessions, saved_session_row,
-    tmux_pane_current_command, tmux_pane_pid, wait_for_file_contains, wait_for_file_exists,
-    wait_for_tmux_client_detach_window, FakeOpenCode, SavedSessionRow, TestEnv,
+    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session, read_saved_sessions,
+    saved_session_row, tmux_pane_current_command, tmux_pane_pid, wait_for_file_contains,
+    wait_for_file_exists, wait_for_tmux_client_detach_window,
 };
 use predicates::prelude::*;
 use std::fs;
