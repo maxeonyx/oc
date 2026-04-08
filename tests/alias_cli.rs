@@ -1,60 +1,10 @@
 mod common;
 
-use common::TestEnv;
+use common::{SavedSessionRow, TestEnv, read_saved_sessions, saved_session_row};
 use predicates::prelude::*;
-use rusqlite::{Connection, OpenFlags, params};
 use std::fs;
-use std::path::{Path, PathBuf};
 
 const EMPTY_ARGS_JSON: &str = "[]";
-
-#[derive(Debug, PartialEq, Eq)]
-struct SavedSessionRow {
-    id: i64,
-    name: String,
-    directory: PathBuf,
-    opencode_session_id: Option<String>,
-    opencode_args: String,
-}
-
-fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
-    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
-
-    let mut statement = connection
-        .prepare(
-            "
-            SELECT id, name, directory, opencode_session_id, opencode_args
-            FROM sessions
-            ORDER BY id
-            ",
-        )
-        .expect("sessions table should be queryable");
-
-    statement
-        .query_map(params![], |row| {
-            Ok(SavedSessionRow {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                directory: PathBuf::from(row.get::<_, String>(2)?),
-                opencode_session_id: row.get(3)?,
-                opencode_args: row.get(4)?,
-            })
-        })
-        .expect("session rows should be readable")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("session rows should decode")
-}
-
-fn saved_session(id: i64, name: &str, directory: &Path, opencode_args: &str) -> SavedSessionRow {
-    SavedSessionRow {
-        id,
-        name: String::from(name),
-        directory: directory.to_path_buf(),
-        opencode_session_id: None,
-        opencode_args: String::from(opencode_args),
-    }
-}
 
 fn alias_in_root_dir(env: &TestEnv, name: &str) {
     env.oc_cmd()
@@ -86,7 +36,7 @@ fn alias_creates_db_and_inserts_session_with_default_dir() {
 
     assert_saved_sessions(
         &env,
-        vec![saved_session(
+        vec![saved_session_row(
             1,
             "worktree",
             env.root_dir(),
@@ -119,7 +69,7 @@ fn alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash() {
 
     assert_saved_sessions(
         &env,
-        vec![saved_session(
+        vec![saved_session_row(
             1,
             "dc",
             &project_dir,
@@ -154,7 +104,7 @@ fn alias_rejects_duplicate_name() {
 
     assert_saved_sessions(
         &env,
-        vec![saved_session(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
+        vec![saved_session_row(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
     );
 }
 
@@ -171,9 +121,9 @@ fn alias_assigns_dense_gap_filling_ids() {
     assert_saved_sessions(
         &env,
         vec![
-            saved_session(1, "one", env.root_dir(), EMPTY_ARGS_JSON),
-            saved_session(2, "four", env.root_dir(), EMPTY_ARGS_JSON),
-            saved_session(3, "three", env.root_dir(), EMPTY_ARGS_JSON),
+            saved_session_row(1, "one", env.root_dir(), EMPTY_ARGS_JSON),
+            saved_session_row(2, "four", env.root_dir(), EMPTY_ARGS_JSON),
+            saved_session_row(3, "three", env.root_dir(), EMPTY_ARGS_JSON),
         ],
     );
 }

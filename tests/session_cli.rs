@@ -1,66 +1,16 @@
 mod common;
 
 use common::{
-    FakeOpenCode, TestEnv, detach_tmux_client_from_session, tmux_pane_current_command,
-    tmux_pane_pid, wait_for_file_contains, wait_for_file_exists,
-    wait_for_tmux_client_detach_window,
+    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session, read_saved_sessions,
+    saved_session_row, tmux_pane_current_command, tmux_pane_pid, wait_for_file_contains,
+    wait_for_file_exists, wait_for_tmux_client_detach_window,
 };
 use predicates::prelude::*;
-use rusqlite::{Connection, OpenFlags, params};
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 const EMPTY_ARGS_JSON: &str = "[]";
-
-#[derive(Debug, PartialEq, Eq)]
-struct SavedSessionRow {
-    id: i64,
-    name: String,
-    directory: PathBuf,
-    opencode_session_id: Option<String>,
-    opencode_args: String,
-}
-
-fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
-    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
-
-    let mut statement = connection
-        .prepare(
-            "
-            SELECT id, name, directory, opencode_session_id, opencode_args
-            FROM sessions
-            ORDER BY id
-            ",
-        )
-        .expect("sessions table should be queryable");
-
-    statement
-        .query_map(params![], |row| {
-            Ok(SavedSessionRow {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                directory: PathBuf::from(row.get::<_, String>(2)?),
-                opencode_session_id: row.get(3)?,
-                opencode_args: row.get(4)?,
-            })
-        })
-        .expect("session rows should be readable")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("session rows should decode")
-}
-
-fn saved_session(id: i64, name: &str, directory: &Path, opencode_args: &str) -> SavedSessionRow {
-    SavedSessionRow {
-        id,
-        name: String::from(name),
-        directory: directory.to_path_buf(),
-        opencode_session_id: None,
-        opencode_args: String::from(opencode_args),
-    }
-}
 
 fn managed_tmux_session_name(env: &TestEnv, name: &str) -> String {
     format!("{}{}", env.tmux_prefix(), name)
@@ -125,7 +75,7 @@ fn new_creates_alias_launches_tmux_session_and_attaches() {
 
     assert_saved_sessions(
         &env,
-        vec![saved_session(
+        vec![saved_session_row(
             1,
             "worktree",
             env.root_dir(),
@@ -167,7 +117,7 @@ fn new_uses_explicit_dir_and_args_when_launching_tmux_session() {
 
     assert_saved_sessions(
         &env,
-        vec![saved_session(
+        vec![saved_session_row(
             1,
             "dc",
             &project_dir,
@@ -219,7 +169,7 @@ fn new_rejects_duplicate_name_without_creating_second_tmux_session() {
 
     assert_saved_sessions(
         &env,
-        vec![saved_session(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
+        vec![saved_session_row(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
     );
     assert_eq!(env.list_tmux_sessions(), vec![session_name]);
 }
@@ -248,7 +198,7 @@ fn rm_removes_alias_and_kills_running_tmux_session_by_numeric_id() {
 
     assert_saved_sessions(
         &env,
-        vec![saved_session(2, "two", env.root_dir(), EMPTY_ARGS_JSON)],
+        vec![saved_session_row(2, "two", env.root_dir(), EMPTY_ARGS_JSON)],
     );
     assert_eq!(env.list_tmux_sessions(), vec![session_two]);
 }
@@ -288,7 +238,7 @@ fn stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias() {
     );
     assert_saved_sessions(
         &env,
-        vec![saved_session(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
+        vec![saved_session_row(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
     );
 }
 
@@ -302,7 +252,7 @@ fn stop_accepts_numeric_id() {
     env.wait_for_tmux_session_absent(&session_name);
     assert_saved_sessions(
         &env,
-        vec![saved_session(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
+        vec![saved_session_row(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
     );
 }
 

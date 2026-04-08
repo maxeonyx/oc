@@ -1,48 +1,8 @@
 mod common;
 
-use common::TestEnv;
+use common::{TestEnv, read_saved_sessions};
 use predicates::prelude::*;
-use rusqlite::{Connection, OpenFlags, params};
 use std::fs;
-use std::path::{Path, PathBuf};
-
-#[derive(Debug, PartialEq, Eq)]
-struct SavedSessionRow {
-    id: i64,
-    name: String,
-    directory: PathBuf,
-    opencode_session_id: Option<String>,
-    opencode_args: String,
-}
-
-fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
-    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
-
-    let mut statement = connection
-        .prepare(
-            "
-            SELECT id, name, directory, opencode_session_id, opencode_args
-            FROM sessions
-            ORDER BY id
-            ",
-        )
-        .expect("sessions table should be queryable");
-
-    statement
-        .query_map(params![], |row| {
-            Ok(SavedSessionRow {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                directory: PathBuf::from(row.get::<_, String>(2)?),
-                opencode_session_id: row.get(3)?,
-                opencode_args: row.get(4)?,
-            })
-        })
-        .expect("session rows should be readable")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("session rows should decode")
-}
 
 #[test]
 fn migrate_imports_old_aliases_file_idempotently() {

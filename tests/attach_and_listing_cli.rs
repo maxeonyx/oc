@@ -1,65 +1,16 @@
 mod common;
 
 use common::{
-    FakeOpenCode, TestEnv, detach_tmux_client_from_session, spawn_tmux_attach_client,
-    tmux_session_attached_count, wait_for_file_exists, wait_for_tmux_client_detach_window,
-    wait_for_tmux_session_attached,
+    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session, read_saved_sessions,
+    saved_session_row, spawn_tmux_attach_client, tmux_session_attached_count, wait_for_file_exists,
+    wait_for_tmux_client_detach_window, wait_for_tmux_session_attached,
 };
 use predicates::prelude::*;
-use rusqlite::{Connection, OpenFlags, params};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
 const EMPTY_ARGS_JSON: &str = "[]";
-
-#[derive(Debug, PartialEq, Eq)]
-struct SavedSessionRow {
-    id: i64,
-    name: String,
-    directory: PathBuf,
-    opencode_session_id: Option<String>,
-    opencode_args: String,
-}
-
-fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
-    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
-
-    let mut statement = connection
-        .prepare(
-            "
-            SELECT id, name, directory, opencode_session_id, opencode_args
-            FROM sessions
-            ORDER BY id
-            ",
-        )
-        .expect("sessions table should be queryable");
-
-    statement
-        .query_map(params![], |row| {
-            Ok(SavedSessionRow {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                directory: PathBuf::from(row.get::<_, String>(2)?),
-                opencode_session_id: row.get(3)?,
-                opencode_args: row.get(4)?,
-            })
-        })
-        .expect("session rows should be readable")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("session rows should decode")
-}
-
-fn saved_session(id: i64, name: &str, directory: &Path, opencode_args: &str) -> SavedSessionRow {
-    SavedSessionRow {
-        id,
-        name: String::from(name),
-        directory: directory.to_path_buf(),
-        opencode_session_id: None,
-        opencode_args: String::from(opencode_args),
-    }
-}
 
 fn managed_tmux_session_name(env: &TestEnv, name: &str) -> String {
     format!("{}{}", env.tmux_prefix(), name)
@@ -204,7 +155,7 @@ fn bare_target_launches_saved_alias_by_name_when_tmux_session_is_missing() {
     );
     assert_saved_sessions(
         &env,
-        vec![saved_session(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
+        vec![saved_session_row(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
     );
 }
 

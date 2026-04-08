@@ -2,6 +2,7 @@
 
 use assert_cmd::Command;
 use rand::Rng;
+use rusqlite::{Connection, OpenFlags, params};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -394,6 +395,15 @@ pub struct FakeOpenCode {
     log_dir: PathBuf,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct SavedSessionRow {
+    pub id: i64,
+    pub name: String,
+    pub directory: PathBuf,
+    pub opencode_session_id: Option<String>,
+    pub opencode_args: String,
+}
+
 impl TestEnv {
     pub fn new(scope_name: &str) -> Self {
         let tmux_scope_prefix = tmux_scope_prefix(scope_name);
@@ -558,6 +568,50 @@ impl Drop for TestEnv {
     fn drop(&mut self) {
         cleanup_tmux_sessions_with_prefix(&self.tmux_scope_prefix);
         let _ = fs::remove_dir_all(&self.root_dir);
+    }
+}
+
+pub fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
+    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, name, directory, opencode_session_id, opencode_args
+            FROM sessions
+            ORDER BY id
+            ",
+        )
+        .expect("sessions table should be queryable");
+
+    statement
+        .query_map(params![], |row| {
+            Ok(SavedSessionRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                directory: PathBuf::from(row.get::<_, String>(2)?),
+                opencode_session_id: row.get(3)?,
+                opencode_args: row.get(4)?,
+            })
+        })
+        .expect("session rows should be readable")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("session rows should decode")
+}
+
+pub fn saved_session_row(
+    id: i64,
+    name: &str,
+    directory: &Path,
+    opencode_args: &str,
+) -> SavedSessionRow {
+    SavedSessionRow {
+        id,
+        name: String::from(name),
+        directory: directory.to_path_buf(),
+        opencode_session_id: None,
+        opencode_args: String::from(opencode_args),
     }
 }
 

@@ -4,8 +4,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{Frame, layout::Direction};
 
-use super::app::DashboardState;
-use super::model::{DashboardAction, DisplayRow, InputMode};
+use super::format::{ColumnWidths, format_column_row, format_memory};
+use super::selection::action_label;
+use super::state::DashboardState;
+use super::types::{DisplayRow, InputMode};
 
 pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
     let areas = Layout::default()
@@ -38,12 +40,8 @@ fn render_summary(state: &DashboardState) -> Paragraph<'static> {
 
 fn render_sessions(state: &DashboardState) -> Paragraph<'static> {
     let widths = column_widths(state);
-    let totals = state.totals();
 
-    let mut lines = vec![Line::from(Span::styled(
-        format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", &widths),
-        Style::default().add_modifier(Modifier::BOLD | Modifier::DIM),
-    ))];
+    let mut lines = Vec::new();
 
     lines.extend(
         state
@@ -51,6 +49,10 @@ fn render_sessions(state: &DashboardState) -> Paragraph<'static> {
             .iter()
             .enumerate()
             .map(|(index, row)| match row {
+                DisplayRow::ColumnHeader => Line::from(Span::styled(
+                    format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", &widths),
+                    Style::default().add_modifier(Modifier::BOLD | Modifier::DIM),
+                )),
                 DisplayRow::GroupHeader { title } => Line::from(Span::styled(
                     format!("─ {title} ─"),
                     Style::default().add_modifier(Modifier::BOLD),
@@ -77,20 +79,19 @@ fn render_sessions(state: &DashboardState) -> Paragraph<'static> {
                     ),
                     selection_style(index == state.selected_index),
                 )),
+                DisplayRow::Totals(totals) => Line::from(Span::styled(
+                    format_column_row(
+                        &totals.filtered_sessions.to_string(),
+                        "total sessions",
+                        &totals.filtered_running.to_string(),
+                        &format_memory(totals.filtered_memory_bytes),
+                        "filtered",
+                        &widths,
+                    ),
+                    Style::default().add_modifier(Modifier::DIM | Modifier::BOLD),
+                )),
             }),
     );
-
-    lines.push(Line::from(Span::styled(
-        format_column_row(
-            &totals.filtered_sessions.to_string(),
-            "total sessions",
-            &totals.filtered_running.to_string(),
-            &format_memory(totals.filtered_memory_bytes),
-            "filtered",
-            &widths,
-        ),
-        Style::default().add_modifier(Modifier::DIM | Modifier::BOLD),
-    )));
 
     Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Dashboard"))
 }
@@ -141,53 +142,6 @@ fn selection_style(selected: bool) -> Style {
     } else {
         Style::default()
     }
-}
-
-fn action_label(action: DashboardAction) -> &'static str {
-    match action {
-        DashboardAction::Attach => "ATTACH",
-        DashboardAction::Stop => "STOP",
-        DashboardAction::Remove => "RM",
-        DashboardAction::Restart => "RESTART",
-        DashboardAction::Create => "CREATE",
-    }
-}
-
-fn format_memory(bytes: u64) -> String {
-    if bytes == 0 {
-        return String::from("0 MiB");
-    }
-
-    format!("{} MiB", bytes / 1024 / 1024)
-}
-
-struct ColumnWidths {
-    id: usize,
-    name: usize,
-    status: usize,
-    memory: usize,
-}
-
-fn format_column_row(
-    id: &str,
-    name: &str,
-    status: &str,
-    memory: &str,
-    directory: &str,
-    widths: &ColumnWidths,
-) -> String {
-    format!(
-        "{:<id_width$}  {:<name_width$}  {:<status_width$}  {:<memory_width$}  {}",
-        id,
-        name,
-        status,
-        memory,
-        directory,
-        id_width = widths.id,
-        name_width = widths.name,
-        status_width = widths.status,
-        memory_width = widths.memory,
-    )
 }
 
 fn column_widths(state: &DashboardState) -> ColumnWidths {
