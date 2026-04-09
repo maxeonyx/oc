@@ -49,11 +49,39 @@ pub fn preferred_action_for_row(row: &DashboardRow, current: DashboardAction) ->
         return current;
     }
 
-    if available.contains(&DashboardAction::Attach) {
-        DashboardAction::Attach
-    } else {
-        available[0]
+    let ordered_actions = DashboardAction::ALL;
+    let current_index = ordered_actions
+        .iter()
+        .position(|action| *action == current)
+        .unwrap_or(0);
+
+    for offset in 1..=ordered_actions.len() {
+        let candidate = ordered_actions[(current_index + offset) % ordered_actions.len()];
+        if available.contains(&candidate) {
+            return candidate;
+        }
     }
+
+    available[0]
+}
+
+pub fn cycle_action_for_row(
+    row: &DashboardRow,
+    current: DashboardAction,
+    delta: isize,
+) -> DashboardAction {
+    let actions = available_actions(row);
+    if actions.is_empty() {
+        return current;
+    }
+
+    let current = preferred_action_for_row(row, current);
+    let current_index = actions
+        .iter()
+        .position(|action| *action == current)
+        .unwrap_or(0) as isize;
+    let len = actions.len() as isize;
+    actions[(current_index + delta).rem_euclid(len) as usize]
 }
 
 pub fn available_actions(row: &DashboardRow) -> Vec<DashboardAction> {

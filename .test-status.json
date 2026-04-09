@@ -43,14 +43,14 @@
     "oc::tui_logic$empty_filter_places_new_row_after_directory_matches": "passing",
     "oc::tui_logic$empty_filter_shows_new_row_then_sessions_when_no_directory_match": "passing",
     "oc::tui_logic$filter_enters_top_result_after_refreshing_from_previous_selection": "passing",
-    "oc::tui_logic$filter_matching_is_case_insensitive": "pending",
     "oc::tui_logic$filter_groups_by_priority_then_match_strength": "passing",
+    "oc::tui_logic$filter_matching_is_case_insensitive": "passing",
     "oc::tui_logic$filter_uses_highest_priority_match_only_once": "passing",
-    "oc::tui_logic$persistent_action_auto_advances_and_cycles_skip_unavailable_actions": "pending",
+    "oc::tui_logic$persistent_action_auto_advances_and_cycles_skip_unavailable_actions": "passing",
     "oc::tui_logic$preferred_action_falls_back_when_row_cannot_support_requested_action": "passing",
-    "oc::tui_logic$summary_counts_react_to_filter_but_not_command_mode": "pending",
+    "oc::tui_logic$summary_counts_react_to_filter_but_not_command_mode": "passing",
     "oc::tui_logic$totals_only_count_session_rows": "passing",
-    "oc::tui_logic$totals_scope_label_depends_on_filter_state": "pending",
+    "oc::tui_logic$totals_scope_label_depends_on_filter_state": "passing",
     "oc::version_smoke$version_flag_prints_package_version": "passing"
   }
 }

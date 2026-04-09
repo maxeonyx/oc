@@ -13,13 +13,16 @@ use crate::commands;
 use crate::service::SessionService;
 
 use super::command::{parse_command, CommandParseError};
-use super::filter::build_view;
+use super::filter::{build_view, summary_for_view, totals_scope_label};
 use super::input::{map_key_event, InputIntent};
 use super::render;
 use super::selection::{
-    available_actions, preferred_action_for_row, select_index_for_input, SelectedSession,
+    available_actions, cycle_action_for_row, preferred_action_for_row, select_index_for_input,
+    SelectedSession,
 };
-use super::types::{DashboardAction, DashboardSnapshot, DashboardView, InputMode};
+use super::types::{
+    DashboardAction, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,
+};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -177,17 +180,9 @@ impl DashboardState {
     }
 
     pub fn cycle_action(&mut self, delta: isize) {
-        let actions = self.available_actions();
-        if actions.is_empty() {
-            return;
+        if let Some(row) = self.selected_row() {
+            self.selected_action = cycle_action_for_row(row, self.selected_action, delta);
         }
-
-        let current_index = actions
-            .iter()
-            .position(|action| *action == self.selected_action)
-            .unwrap_or(0) as isize;
-        let len = actions.len() as isize;
-        self.selected_action = actions[(current_index + delta).rem_euclid(len) as usize];
     }
 
     pub fn enter_command_mode(&mut self) {
@@ -228,6 +223,19 @@ impl DashboardState {
         self.selected_row()
             .map(available_actions)
             .unwrap_or_default()
+    }
+
+    pub fn summary(&self) -> DashboardSummary {
+        summary_for_view(
+            &self.snapshot.summary,
+            &self.view,
+            self.input_mode,
+            &self.input_text,
+        )
+    }
+
+    pub fn totals_scope_label(&self) -> &'static str {
+        totals_scope_label(self.input_mode, &self.input_text)
     }
 
     fn reconcile_selected_action(&mut self) {

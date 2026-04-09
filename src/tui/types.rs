@@ -14,6 +14,7 @@ pub struct DashboardSnapshot {
 pub struct DashboardView {
     pub groups: Vec<DashboardGroup>,
     pub totals: DashboardSummary,
+    pub filter_active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,5 +158,9 @@ impl DashboardAction {
 impl DashboardView {
     pub fn sessions(&self) -> impl Iterator<Item = &DashboardRow> {
         self.groups.iter().flat_map(|group| group.sessions.iter())
+    }
+
+    pub fn has_filter(&self) -> bool {
+        self.filter_active
     }
 }

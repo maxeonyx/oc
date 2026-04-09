@@ -26,6 +26,7 @@ pub fn build_view(
     input_mode: InputMode,
     current_directory: Option<PathBuf>,
 ) -> DashboardView {
+    let filter_active = input_mode == InputMode::Filter && !filter_text.is_empty();
     let groups = if input_mode == InputMode::Command || filter_text.is_empty() {
         groups_without_filter(snapshot, current_directory.as_deref())
     } else {
@@ -37,7 +38,11 @@ pub fn build_view(
         groups.iter().flat_map(|group| group.sessions.iter()),
     );
 
-    DashboardView { groups, totals }
+    DashboardView {
+        groups,
+        totals,
+        filter_active,
+    }
 }
 
 pub fn totals_for_rows<'a>(
@@ -69,6 +74,40 @@ pub fn totals_label(summary: &DashboardSummary) -> String {
     )
 }
 
+pub fn totals_scope_label(input_mode: InputMode, input_text: &str) -> &'static str {
+    if input_mode == InputMode::Filter && !input_text.is_empty() {
+        "filtered"
+    } else {
+        "all sessions"
+    }
+}
+
+pub fn summary_for_view(
+    summary: &DashboardSummary,
+    view: &DashboardView,
+    input_mode: InputMode,
+    input_text: &str,
+) -> DashboardSummary {
+    if input_mode == InputMode::Filter && !input_text.is_empty() {
+        let mut filtered_summary = summary.clone();
+        filtered_summary.attached = 0;
+        filtered_summary.detached = 0;
+        filtered_summary.saved = 0;
+
+        for row in view.sessions() {
+            match row.status {
+                crate::session::SessionStatus::RunningAttached => filtered_summary.attached += 1,
+                crate::session::SessionStatus::RunningDetached => filtered_summary.detached += 1,
+                crate::session::SessionStatus::Saved => filtered_summary.saved += 1,
+            }
+        }
+
+        filtered_summary
+    } else {
+        summary.clone()
+    }
+}
+
 fn groups_without_filter(
     snapshot: &DashboardSnapshot,
     current_directory: Option<&Path>,
@@ -96,6 +135,7 @@ fn groups_without_filter(
 }
 
 fn groups_with_filter(snapshot: &DashboardSnapshot, filter_text: &str) -> Vec<DashboardGroup> {
+    let normalized_filter = filter_text.to_ascii_lowercase();
     let numeric_filter = is_numeric_filter(filter_text);
     let mut numeric_matches = Vec::new();
     let mut name_matches = Vec::new();
@@ -103,7 +143,8 @@ fn groups_with_filter(snapshot: &DashboardSnapshot, filter_text: &str) -> Vec<Da
     let mut opencode_matches = Vec::new();
 
     for row in &snapshot.rows {
-        let Some((group, strength)) = best_match_for_row(row, filter_text, numeric_filter) else {
+        let Some((group, strength)) = best_match_for_row(row, &normalized_filter, numeric_filter)
+        else {
             continue;
         };
 
@@ -141,15 +182,20 @@ fn append_group(
 }
 
 fn classify_match(value: &str, filter_text: &str) -> Option<MatchStrength> {
+    let normalized_value = value.to_ascii_lowercase();
     if value == filter_text {
         return Some(MatchStrength::Exact);
     }
 
-    if value.starts_with(filter_text) {
+    if normalized_value == filter_text {
+        return Some(MatchStrength::Exact);
+    }
+
+    if normalized_value.starts_with(filter_text) {
         return Some(MatchStrength::Prefix);
     }
 
-    value
+    normalized_value
         .contains(filter_text)
         .then_some(MatchStrength::Contains)
 }
@@ -164,7 +210,7 @@ fn classify_numeric_id_match(session_id: i64, filter_text: &str) -> Option<Match
         return Some(MatchStrength::Prefix);
     }
 
-    (id_text.len() > filter_text.len() && id_text[1..].contains(filter_text))
+    (id_text.len() > filter_text.len() && id_text.contains(filter_text))
         .then_some(MatchStrength::Contains)
 }
 
