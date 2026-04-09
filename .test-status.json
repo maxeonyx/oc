@@ -52,11 +52,5 @@
     "oc::tui_logic$totals_only_count_session_rows": "passing",
     "oc::tui_logic$totals_scope_label_depends_on_filter_state": "passing",
     "oc::version_smoke$version_flag_prints_package_version": "passing"
-  },
-  "renames": {
-    "oc::tui_logic$default_selection_prefers_directory_match_first": "oc::tui_logic$default_selection_prefers_directory_match_before_new_session",
-    "oc::tui_logic$default_selection_prefers_first_session_without_directory_match": "oc::tui_logic$default_selection_prefers_new_session_without_directory_match",
-    "oc::tui_logic$empty_filter_places_directory_matches_first": "oc::tui_logic$empty_filter_places_new_row_after_directory_matches",
-    "oc::tui_logic$empty_filter_shows_sessions_when_no_directory_match": "oc::tui_logic$empty_filter_shows_new_row_then_sessions_when_no_directory_match"
   }
 }
