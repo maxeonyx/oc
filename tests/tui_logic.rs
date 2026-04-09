@@ -2,7 +2,7 @@ use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
 use oc::tui::command::{parse_command, CommandParseError};
 use oc::tui::filter::{build_view, totals_for_rows};
-use oc::tui::selection::{preferred_action_for_row, select_index};
+use oc::tui::selection::{preferred_action_for_row, select_index, select_index_for_input};
 use oc::tui::types::{DashboardAction, DashboardRow, DashboardSnapshot, DashboardView, InputMode};
 
 use std::path::PathBuf;
@@ -298,11 +298,20 @@ fn filter_enters_top_result_after_refreshing_from_previous_selection() {
     let unfiltered_view = build_view(&snapshot, "", InputMode::Filter, None);
     let previous_selection = Some(oc::tui::selection::SelectedSession(2));
 
-    assert_eq!(select_index(&unfiltered_view, previous_selection, None), 1);
+    assert_eq!(select_index(&unfiltered_view, previous_selection, None), 2);
 
     let filtered_view = build_view(&snapshot, "1", InputMode::Filter, None);
 
-    assert_eq!(select_index(&filtered_view, None, None), 0);
+    assert_eq!(
+        select_index_for_input(
+            &filtered_view,
+            previous_selection,
+            None,
+            InputMode::Filter,
+            "1"
+        ),
+        0
+    );
 }
 
 fn session_entry(

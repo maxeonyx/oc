@@ -7,6 +7,14 @@ use crate::tmux;
 use crate::tui;
 
 pub fn run(service: &SessionService, action: RequestedAction) -> Result<()> {
+    if matches!(action, RequestedAction::Default) && service.auto_attach_directory_match()? {
+        return Ok(());
+    }
+
+    run_requested_action(service, action)
+}
+
+pub fn run_requested_action(service: &SessionService, action: RequestedAction) -> Result<()> {
     match action {
         RequestedAction::New {
             name,
@@ -25,13 +33,7 @@ pub fn run(service: &SessionService, action: RequestedAction) -> Result<()> {
         RequestedAction::Move { target, new_dir } => service.move_session(&target, new_dir),
         RequestedAction::Migrate => run_migrate(service),
         RequestedAction::AttachTarget { target } => service.activate_target(&target),
-        RequestedAction::Default => {
-            if service.auto_attach_directory_match()? {
-                return Ok(());
-            }
-
-            tui::run_dashboard(service)
-        }
+        RequestedAction::Default => tui::run_dashboard(service),
         RequestedAction::DumpSessionList => run_dump_session_list(service),
         RequestedAction::DumpRuntimeConfig => {
             service.config().write_debug_dump();

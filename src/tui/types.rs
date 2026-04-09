@@ -11,6 +11,18 @@ pub struct DashboardSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DashboardView {
+    pub groups: Vec<DashboardGroup>,
+    pub totals: DashboardSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DashboardGroup {
+    pub title: Option<String>,
+    pub sessions: Vec<DashboardRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DashboardSummary {
     pub attached: usize,
     pub detached: usize,
@@ -37,22 +49,19 @@ pub enum DashboardAction {
     Stop,
     Remove,
     Restart,
-    Create,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionState {
+    pub action: DashboardAction,
+    pub enabled: bool,
+    pub selected: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Filter,
     Command,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DisplayRow {
-    ColumnHeader,
-    GroupHeader { title: String },
-    NewSession,
-    Session(DashboardRow),
-    Totals(DashboardSummary),
 }
 
 impl DashboardSnapshot {
@@ -141,11 +150,12 @@ impl DashboardRow {
     }
 }
 
-impl DisplayRow {
-    pub fn session(&self) -> Option<&DashboardRow> {
-        match self {
-            Self::Session(row) => Some(row),
-            _ => None,
-        }
+impl DashboardAction {
+    pub const ALL: [Self; 4] = [Self::Attach, Self::Stop, Self::Remove, Self::Restart];
+}
+
+impl DashboardView {
+    pub fn sessions(&self) -> impl Iterator<Item = &DashboardRow> {
+        self.groups.iter().flat_map(|group| group.sessions.iter())
     }
 }

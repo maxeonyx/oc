@@ -1,30 +1,31 @@
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::commands;
 use crate::service::SessionService;
 
-use super::command::{CommandParseError, ParsedCommand, parse_command};
-use super::filter::{build_display_rows, totals_for_rows};
-use super::input::{InputIntent, map_key_event};
+use super::command::{parse_command, CommandParseError};
+use super::filter::build_view;
+use super::input::{map_key_event, InputIntent};
 use super::render;
 use super::selection::{
-    SelectedIdentity, available_actions, preferred_action_for_row, select_index,
+    available_actions, preferred_action_for_row, select_index_for_input, SelectedSession,
 };
-use super::types::{DashboardAction, DashboardSnapshot, DisplayRow, InputMode};
+use super::types::{DashboardAction, DashboardSnapshot, DashboardView, InputMode};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub struct DashboardState {
     pub snapshot: DashboardSnapshot,
-    pub display_rows: Vec<DisplayRow>,
+    pub view: DashboardView,
     pub selected_index: usize,
     pub selected_action: DashboardAction,
     pub input_mode: InputMode,
@@ -76,16 +77,8 @@ fn handle_input(
     intent: InputIntent,
 ) -> Result<bool> {
     match intent {
-        InputIntent::QuitOrClear => {
-            if state.input_text.is_empty() {
-                return Ok(true);
-            }
-
-            state.input_text.clear();
-            state.input_mode = InputMode::Filter;
-            state.status_message = None;
-            state.refresh(service)?;
-        }
+        InputIntent::ClearInput => state.clear_input(service)?,
+        InputIntent::Quit => return state.handle_quit(service),
         InputIntent::MoveUp => state.move_selection_up(),
         InputIntent::MoveDown => state.move_selection_down(),
         InputIntent::CycleLeft => state.cycle_action(-1),
@@ -109,7 +102,7 @@ fn handle_input(
 impl DashboardState {
     fn load(
         service: &SessionService,
-        selected_identity: Option<SelectedIdentity>,
+        selected_identity: Option<SelectedSession>,
         preferred_action: DashboardAction,
         input_mode: InputMode,
         input_text: String,
@@ -117,21 +110,23 @@ impl DashboardState {
     ) -> Result<Self> {
         let current_directory = std::env::current_dir().ok();
         let snapshot = DashboardSnapshot::from_session_entries(service.list_dashboard_sessions()?);
-        let display_rows = build_display_rows(
+        let view = build_view(
             &snapshot,
             &input_text,
             input_mode,
             current_directory.clone(),
         );
-        let selected_index = select_index(
-            &display_rows,
+        let selected_index = select_index_for_input(
+            &view,
             selected_identity,
             current_directory.as_deref(),
+            input_mode,
+            &input_text,
         );
 
         let mut state = Self {
             snapshot,
-            display_rows,
+            view,
             selected_index,
             selected_action: preferred_action,
             input_mode,
@@ -145,7 +140,7 @@ impl DashboardState {
     }
 
     fn refresh(&mut self, service: &SessionService) -> Result<()> {
-        let selected_identity = self.selected_identity();
+        let selected_identity = self.selected_session();
         let preferred_action = self.selected_action;
         *self = Self::load(
             service,
@@ -158,41 +153,26 @@ impl DashboardState {
         Ok(())
     }
 
-    pub fn selected_row(&self) -> Option<&DisplayRow> {
-        self.display_rows.get(self.selected_index)
+    pub fn selected_row(&self) -> Option<&super::types::DashboardRow> {
+        self.view.sessions().nth(self.selected_index)
     }
 
-    pub fn selected_identity(&self) -> Option<SelectedIdentity> {
-        match self.selected_row()? {
-            DisplayRow::NewSession => Some(SelectedIdentity::NewSession),
-            DisplayRow::Session(row) => Some(SelectedIdentity::Session(row.session_id)),
-            _ => None,
-        }
-    }
-
-    pub fn totals(&self) -> super::types::DashboardSummary {
-        totals_for_rows(&self.snapshot.summary, &self.display_rows)
+    pub fn selected_session(&self) -> Option<SelectedSession> {
+        self.selected_row()
+            .map(|row| SelectedSession(row.session_id))
     }
 
     pub fn move_selection_up(&mut self) {
-        while self.selected_index > 0 {
+        if self.selected_index > 0 {
             self.selected_index -= 1;
-            if matches!(self.selected_row(), Some(row) if super::selection::is_selectable_row(row))
-            {
-                self.reconcile_selected_action();
-                break;
-            }
+            self.reconcile_selected_action();
         }
     }
 
     pub fn move_selection_down(&mut self) {
-        while self.selected_index + 1 < self.display_rows.len() {
+        if self.selected_index + 1 < self.view.sessions().count() {
             self.selected_index += 1;
-            if matches!(self.selected_row(), Some(row) if super::selection::is_selectable_row(row))
-            {
-                self.reconcile_selected_action();
-                break;
-            }
+            self.reconcile_selected_action();
         }
     }
 
@@ -212,7 +192,9 @@ impl DashboardState {
 
     pub fn enter_command_mode(&mut self) {
         self.input_mode = InputMode::Command;
-        self.input_text.clear();
+        if !self.input_text.ends_with(' ') {
+            self.input_text.push(' ');
+        }
     }
 
     pub fn handle_backspace(&mut self, service: &SessionService) -> Result<()> {
@@ -235,14 +217,8 @@ impl DashboardState {
             return self.execute_command(service);
         }
 
-        match self.selected_row() {
-            Some(DisplayRow::NewSession) => {
-                self.input_mode = InputMode::Command;
-                self.input_text = String::from("new ");
-                self.status_message = None;
-            }
-            Some(DisplayRow::Session(row)) => self.execute_action(service, row.session_id)?,
-            _ => {}
+        if let Some(row) = self.selected_row() {
+            self.execute_action(service, row.session_id)?;
         }
 
         Ok(())
@@ -261,10 +237,10 @@ impl DashboardState {
     }
 
     fn execute_command(&mut self, service: &SessionService) -> Result<()> {
-        let selected_identity = self.selected_identity();
+        let selected_identity = self.selected_session();
         match parse_command(&self.input_text) {
             Ok(command) => {
-                execute_parsed_command(service, command)?;
+                commands::run_requested_action(service, command)?;
                 *self = Self::load(
                     service,
                     selected_identity,
@@ -287,24 +263,28 @@ impl DashboardState {
             DashboardAction::Stop => service.stop_session(&target)?,
             DashboardAction::Remove => service.remove_session(&target)?,
             DashboardAction::Restart => service.restart_session(&target)?,
-            DashboardAction::Create => {
-                self.input_mode = InputMode::Command;
-                self.input_text = String::from("new ");
-                return Ok(());
-            }
         }
 
         self.refresh(service)
     }
-}
 
-fn execute_parsed_command(service: &SessionService, command: ParsedCommand) -> Result<()> {
-    match command {
-        ParsedCommand::New { name } => service.create_session(name, None, Vec::new()),
-        ParsedCommand::Remove { target } => service.remove_session(&target),
-        ParsedCommand::Stop { target } => service.stop_session(&target),
-        ParsedCommand::Restart { target } => service.restart_session(&target),
-        ParsedCommand::Move { target, new_dir } => service.move_session(&target, new_dir),
+    fn clear_input(&mut self, service: &SessionService) -> Result<()> {
+        self.input_text.clear();
+        self.input_mode = InputMode::Filter;
+        self.status_message = None;
+        self.refresh(service)
+    }
+
+    fn handle_quit(&mut self, service: &SessionService) -> Result<bool> {
+        if self.input_text.is_empty() {
+            return Ok(true);
+        }
+
+        self.input_text.clear();
+        self.input_mode = InputMode::Filter;
+        self.status_message = None;
+        self.refresh(service)?;
+        Ok(false)
     }
 }
 

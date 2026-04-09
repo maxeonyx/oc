@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use super::format::format_memory;
-use super::types::{DashboardRow, DashboardSnapshot, DashboardSummary, DisplayRow, InputMode};
+use super::types::{
+    DashboardGroup, DashboardRow, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum MatchStrength {
@@ -18,34 +20,36 @@ enum MatchGroup {
     OpencodeSessionId,
 }
 
-pub fn build_display_rows(
+pub fn build_view(
     snapshot: &DashboardSnapshot,
     filter_text: &str,
     input_mode: InputMode,
     current_directory: Option<PathBuf>,
-) -> Vec<DisplayRow> {
-    let body = if input_mode == InputMode::Command || filter_text.is_empty() {
-        display_rows_without_filter(snapshot, current_directory.as_deref())
+) -> DashboardView {
+    let groups = if input_mode == InputMode::Command || filter_text.is_empty() {
+        groups_without_filter(snapshot, current_directory.as_deref())
     } else {
-        display_rows_with_filter(snapshot, filter_text)
+        groups_with_filter(snapshot, filter_text)
     };
 
-    let mut rows = vec![DisplayRow::ColumnHeader];
-    rows.extend(body);
-    rows.push(DisplayRow::Totals(totals_for_rows(
+    let totals = totals_for_rows(
         &snapshot.summary,
-        &rows,
-    )));
-    rows
+        groups.iter().flat_map(|group| group.sessions.iter()),
+    );
+
+    DashboardView { groups, totals }
 }
 
-pub fn totals_for_rows(summary: &DashboardSummary, rows: &[DisplayRow]) -> DashboardSummary {
+pub fn totals_for_rows<'a>(
+    summary: &DashboardSummary,
+    rows: impl IntoIterator<Item = &'a DashboardRow>,
+) -> DashboardSummary {
     let mut totals = summary.clone();
     totals.filtered_sessions = 0;
     totals.filtered_running = 0;
     totals.filtered_memory_bytes = 0;
 
-    for row in rows.iter().filter_map(DisplayRow::session) {
+    for row in rows {
         totals.filtered_sessions += 1;
         if row.is_running() {
             totals.filtered_running += 1;
@@ -65,10 +69,10 @@ pub fn totals_label(summary: &DashboardSummary) -> String {
     )
 }
 
-fn display_rows_without_filter(
+fn groups_without_filter(
     snapshot: &DashboardSnapshot,
     current_directory: Option<&Path>,
-) -> Vec<DisplayRow> {
+) -> Vec<DashboardGroup> {
     let (matching_rows, remaining_rows) = match current_directory {
         Some(current_directory) => snapshot
             .rows
@@ -78,21 +82,20 @@ fn display_rows_without_filter(
         None => (Vec::new(), snapshot.rows.clone()),
     };
 
-    let mut display_rows = Vec::new();
-
     if matching_rows.is_empty() {
-        display_rows.push(DisplayRow::NewSession);
-        display_rows.extend(remaining_rows.into_iter().map(DisplayRow::Session));
-        return display_rows;
+        return vec![DashboardGroup {
+            title: None,
+            sessions: remaining_rows,
+        }];
     }
 
-    display_rows.extend(matching_rows.into_iter().map(DisplayRow::Session));
-    display_rows.push(DisplayRow::NewSession);
-    display_rows.extend(remaining_rows.into_iter().map(DisplayRow::Session));
-    display_rows
+    vec![DashboardGroup {
+        title: None,
+        sessions: matching_rows.into_iter().chain(remaining_rows).collect(),
+    }]
 }
 
-fn display_rows_with_filter(snapshot: &DashboardSnapshot, filter_text: &str) -> Vec<DisplayRow> {
+fn groups_with_filter(snapshot: &DashboardSnapshot, filter_text: &str) -> Vec<DashboardGroup> {
     let numeric_filter = is_numeric_filter(filter_text);
     let mut numeric_matches = Vec::new();
     let mut name_matches = Vec::new();
@@ -112,21 +115,17 @@ fn display_rows_with_filter(snapshot: &DashboardSnapshot, filter_text: &str) -> 
         }
     }
 
-    let mut display_rows = Vec::new();
-    append_group(&mut display_rows, MatchGroup::NumericId, numeric_matches);
-    append_group(&mut display_rows, MatchGroup::Name, name_matches);
-    append_group(&mut display_rows, MatchGroup::Directory, directory_matches);
-    append_group(
-        &mut display_rows,
-        MatchGroup::OpencodeSessionId,
-        opencode_matches,
-    );
+    let mut groups = Vec::new();
+    append_group(&mut groups, MatchGroup::NumericId, numeric_matches);
+    append_group(&mut groups, MatchGroup::Name, name_matches);
+    append_group(&mut groups, MatchGroup::Directory, directory_matches);
+    append_group(&mut groups, MatchGroup::OpencodeSessionId, opencode_matches);
 
-    display_rows
+    groups
 }
 
 fn append_group(
-    display_rows: &mut Vec<DisplayRow>,
+    groups: &mut Vec<DashboardGroup>,
     group: MatchGroup,
     mut matches: Vec<(MatchStrength, DashboardRow)>,
 ) {
@@ -135,10 +134,10 @@ fn append_group(
     }
 
     matches.sort_by_key(|(strength, _)| *strength);
-    display_rows.push(DisplayRow::GroupHeader {
-        title: String::from(group.title()),
+    groups.push(DashboardGroup {
+        title: Some(String::from(group.title())),
+        sessions: matches.into_iter().map(|(_, row)| row).collect(),
     });
-    display_rows.extend(matches.into_iter().map(|(_, row)| DisplayRow::Session(row)));
 }
 
 fn classify_match(value: &str, filter_text: &str) -> Option<MatchStrength> {
@@ -198,7 +197,7 @@ fn best_match_for_row(
 
     candidates
         .into_iter()
-        .min_by_key(|(strength, group)| (*strength, *group))
+        .min_by_key(|(strength, group)| (*group, *strength))
         .map(|(strength, group)| (group, strength))
 }
 

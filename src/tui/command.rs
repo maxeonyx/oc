@@ -1,13 +1,6 @@
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParsedCommand {
-    New { name: String },
-    Remove { target: String },
-    Stop { target: String },
-    Restart { target: String },
-    Move { target: String, new_dir: PathBuf },
-}
+use crate::cli::RequestedAction;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandParseError {
@@ -17,7 +10,7 @@ pub enum CommandParseError {
     TooManyArguments(String),
 }
 
-pub fn parse_command(input: &str) -> Result<ParsedCommand, CommandParseError> {
+pub fn parse_command(input: &str) -> Result<RequestedAction, CommandParseError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err(CommandParseError::Empty);
@@ -27,13 +20,17 @@ pub fn parse_command(input: &str) -> Result<ParsedCommand, CommandParseError> {
     let command = parts.next().unwrap_or_default();
 
     match command {
-        "new" | "n" => parse_single_arg(command, parts).map(|name| ParsedCommand::New { name }),
+        "new" | "n" => parse_single_arg(command, parts).map(|name| RequestedAction::New {
+            name,
+            dir: None,
+            opencode_args: Vec::new(),
+        }),
         "rm" | "delete" | "d" => {
-            parse_single_arg(command, parts).map(|target| ParsedCommand::Remove { target })
+            parse_single_arg(command, parts).map(|target| RequestedAction::Rm { target })
         }
-        "stop" => parse_single_arg(command, parts).map(|target| ParsedCommand::Stop { target }),
+        "stop" => parse_single_arg(command, parts).map(|target| RequestedAction::Stop { target }),
         "restart" => {
-            parse_single_arg(command, parts).map(|target| ParsedCommand::Restart { target })
+            parse_single_arg(command, parts).map(|target| RequestedAction::Restart { target })
         }
         "mv" => {
             let target = parts
@@ -44,7 +41,7 @@ pub fn parse_command(input: &str) -> Result<ParsedCommand, CommandParseError> {
                 return Err(CommandParseError::MissingArgument(String::from(command)));
             }
 
-            Ok(ParsedCommand::Move {
+            Ok(RequestedAction::Move {
                 target: String::from(target),
                 new_dir: PathBuf::from(remaining.join(" ")),
             })

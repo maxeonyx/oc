@@ -2,7 +2,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputIntent {
-    QuitOrClear,
+    ClearInput,
+    Quit,
     MoveUp,
     MoveDown,
     CycleLeft,
@@ -15,8 +16,16 @@ pub enum InputIntent {
 }
 
 pub fn map_key_event(key_event: KeyEvent, command_mode: bool) -> InputIntent {
+    if key_event.modifiers == KeyModifiers::CONTROL {
+        return match key_event.code {
+            KeyCode::Char('c') => InputIntent::ClearInput,
+            KeyCode::Char('d') => InputIntent::Quit,
+            _ => InputIntent::Ignore,
+        };
+    }
+
     match key_event.code {
-        KeyCode::Esc => InputIntent::QuitOrClear,
+        KeyCode::Esc => InputIntent::Quit,
         KeyCode::Up => InputIntent::MoveUp,
         KeyCode::Down => InputIntent::MoveDown,
         KeyCode::Left => InputIntent::CycleLeft,
