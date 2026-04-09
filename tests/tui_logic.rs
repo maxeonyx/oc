@@ -1,8 +1,10 @@
 use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
 use oc::tui::command::{parse_command, CommandParseError};
-use oc::tui::filter::{build_view, totals_for_rows};
-use oc::tui::selection::{preferred_action_for_row, select_index, select_index_for_input};
+use oc::tui::filter::{build_view, summary_for_view, totals_for_rows, totals_scope_label};
+use oc::tui::selection::{
+    cycle_action_for_row, preferred_action_for_row, select_index, select_index_for_input,
+};
 use oc::tui::types::{DashboardAction, DashboardRow, DashboardSnapshot, DashboardView, InputMode};
 
 use std::path::PathBuf;
@@ -311,6 +313,125 @@ fn filter_enters_top_result_after_refreshing_from_previous_selection() {
             "1"
         ),
         0
+    );
+}
+
+#[test]
+fn filter_matching_is_case_insensitive() {
+    let snapshot = DashboardSnapshot::from_session_entries(vec![session_entry(
+        7,
+        "Dc-Main",
+        "/tmp/Projects/DC-Main",
+        Some("ses_AbCd"),
+        SessionStatus::Saved,
+    )]);
+
+    assert_view(
+        &build_view(&snapshot, "dc", InputMode::Filter, None),
+        &["header", "group:name", "session:7", "totals:1:0"],
+    );
+    assert_view(
+        &build_view(&snapshot, "projects/dc", InputMode::Filter, None),
+        &["header", "group:directory", "session:7", "totals:1:0"],
+    );
+    assert_view(
+        &build_view(&snapshot, "SES_AB", InputMode::Filter, None),
+        &[
+            "header",
+            "group:opencode session id",
+            "session:7",
+            "totals:1:0",
+        ],
+    );
+}
+
+#[test]
+fn summary_counts_react_to_filter_but_not_command_mode() {
+    let snapshot = DashboardSnapshot::from_session_entries(vec![
+        session_entry(1, "alpha", "/tmp/alpha", None, SessionStatus::Saved),
+        session_entry(
+            2,
+            "beta",
+            "/tmp/beta",
+            Some("ses_beta"),
+            SessionStatus::RunningDetached,
+        ),
+        session_entry(
+            3,
+            "gamma",
+            "/tmp/gamma",
+            Some("ses_gamma"),
+            SessionStatus::RunningAttached,
+        ),
+    ]);
+
+    let filtered_view = build_view(&snapshot, "beta", InputMode::Filter, None);
+    let filtered_summary =
+        summary_for_view(&snapshot.summary, &filtered_view, InputMode::Filter, "beta");
+    assert_eq!(filtered_summary.attached, 0);
+    assert_eq!(filtered_summary.detached, 1);
+    assert_eq!(filtered_summary.saved, 0);
+
+    let command_view = build_view(&snapshot, "beta ", InputMode::Command, None);
+    let command_summary = summary_for_view(
+        &snapshot.summary,
+        &command_view,
+        InputMode::Command,
+        "beta ",
+    );
+    assert_eq!(command_summary.attached, 1);
+    assert_eq!(command_summary.detached, 1);
+    assert_eq!(command_summary.saved, 1);
+}
+
+#[test]
+fn totals_scope_label_depends_on_filter_state() {
+    assert_eq!(totals_scope_label(InputMode::Filter, "dc"), "filtered");
+    assert_eq!(totals_scope_label(InputMode::Filter, ""), "all sessions");
+    assert_eq!(
+        totals_scope_label(InputMode::Command, "restart dc"),
+        "all sessions"
+    );
+}
+
+#[test]
+fn persistent_action_auto_advances_and_cycles_skip_unavailable_actions() {
+    let snapshot = DashboardSnapshot::from_session_entries(vec![
+        session_entry(1, "saved", "/tmp/saved", None, SessionStatus::Saved),
+        session_entry(
+            2,
+            "running",
+            "/tmp/running",
+            Some("ses_running"),
+            SessionStatus::RunningDetached,
+        ),
+    ]);
+    let view = build_view(&snapshot, "", InputMode::Filter, None);
+
+    let saved_row = view
+        .sessions()
+        .find(|session| session.session_id == 1)
+        .expect("saved row should exist");
+
+    assert_eq!(
+        preferred_action_for_row(saved_row, DashboardAction::Stop),
+        DashboardAction::Remove
+    );
+    assert_eq!(
+        preferred_action_for_row(saved_row, DashboardAction::Restart),
+        DashboardAction::Attach
+    );
+    assert_eq!(
+        cycle_action_for_row(saved_row, DashboardAction::Attach, 1),
+        DashboardAction::Remove
+    );
+    assert_eq!(
+        cycle_action_for_row(saved_row, DashboardAction::Remove, 1),
+        DashboardAction::Attach
+    );
+    assert_eq!(
+        cycle_action_for_row(saved_row, DashboardAction::Remove, -1),
+        DashboardAction::Attach
     );
 }
 
