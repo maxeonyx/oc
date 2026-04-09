@@ -2,7 +2,7 @@
 
 use assert_cmd::Command;
 use rand::Rng;
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{params, Connection, OpenFlags};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -127,6 +127,26 @@ pub fn create_tmux_session(session_name: &str) {
         panic!(
             "Failed to create tmux session {}\nstdout:\n{}\nstderr:\n{}",
             session_name,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+pub fn create_tmux_session_in_dir(session_name: &str, directory: &Path) {
+    let directory = directory
+        .to_str()
+        .unwrap_or_else(|| panic!("Directory should be valid UTF-8: {}", directory.display()));
+    let output = run_tmux_output(
+        &["new-session", "-d", "-s", session_name, "-c", directory],
+        "create tmux session for test in directory",
+    );
+
+    if !output.status.success() {
+        panic!(
+            "Failed to create tmux session {} in {}\nstdout:\n{}\nstderr:\n{}",
+            session_name,
+            directory,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -259,6 +279,34 @@ pub fn tmux_pane_current_command(session_name: &str) -> String {
     }
 
     current_command
+}
+
+pub fn capture_tmux_pane(session_name: &str) -> String {
+    let output = run_tmux_success(
+        &["capture-pane", "-p", "-t", session_name],
+        "capture tmux pane",
+    );
+
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+pub fn send_keys_to_tmux_session(session_name: &str, keys: &[&str]) {
+    let mut args = vec!["send-keys", "-t", session_name];
+    args.extend(keys);
+    run_tmux_success(&args, "send keys to tmux session");
+}
+
+pub fn wait_for_tmux_pane_contains(session_name: &str, needle: &str, timeout: Duration) -> String {
+    let description = format!("tmux pane {} to contain {}", session_name, needle);
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let contents = capture_tmux_pane(session_name);
+        if contents.contains(needle) {
+            WaitStatus::ready(contents.clone(), contents)
+        } else {
+            WaitStatus::pending(contents)
+        }
+    })
 }
 
 fn tmux_display_message(session_name: &str, format_string: &str) -> String {
@@ -536,6 +584,10 @@ printf 'EOF\n' >>\"$log_dir/events.txt\"
 }
 
 impl FakeOpenCode {
+    pub fn bin_dir(&self) -> &Path {
+        &self.bin_dir
+    }
+
     pub fn log_dir(&self) -> &Path {
         &self.log_dir
     }

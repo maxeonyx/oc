@@ -1,9 +1,11 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session, read_saved_sessions,
-    saved_session_row, spawn_tmux_attach_client, tmux_session_attached_count, wait_for_file_exists,
-    wait_for_tmux_client_detach_window, wait_for_tmux_session_attached,
+    capture_tmux_pane, create_tmux_session_in_dir, detach_tmux_client_from_session,
+    read_saved_sessions, saved_session_row, send_keys_to_tmux_session, spawn_tmux_attach_client,
+    tmux_session_attached_count, wait_for_file_exists, wait_for_tmux_client_detach_window,
+    wait_for_tmux_pane_contains, wait_for_tmux_session_attached, FakeOpenCode, SavedSessionRow,
+    TestEnv,
 };
 use predicates::prelude::*;
 use std::path::Path;
@@ -204,6 +206,108 @@ fn no_arg_auto_attach_attaches_single_running_directory_match() {
     launch_via_new(&env, &fake_opencode, "dc");
 
     assert_interactive_oc_command_succeeds_after_detach(&env, &fake_opencode, &[], &session_name);
+}
+
+#[test]
+fn no_arg_auto_attach_falls_back_to_dashboard_when_attach_fails() {
+    let env = TestEnv::new("auto-attach-fallback-on-attach-failure");
+    let fake_opencode = env.install_fake_opencode();
+    let parent_session_name = format!("{}parent", env.tmux_prefix());
+
+    create_saved_alias(&env, "dc", Some(env.root_dir()));
+
+    create_tmux_session_in_dir(&parent_session_name, env.root_dir());
+
+    let parent_command = format!(
+        "PATH=\"{}:{}\" OC_FAKE_OPENCODE_LOG_DIR=\"{}\" OC_ALIASES_FILE=\"{}\" OC_TMUX_PREFIX=\"{}\" OC_OPENCODE_DB=\"{}\" TMUX=nested-test {}",
+        fake_opencode.bin_dir().display(),
+        std::env::var("PATH").expect("PATH should exist for test"),
+        fake_opencode.log_dir().display(),
+        env.aliases_file().display(),
+        env.tmux_prefix(),
+        env.opencode_db().display(),
+        assert_cmd::cargo::cargo_bin("oc").display()
+    );
+    send_keys_to_tmux_session(&parent_session_name, &[&parent_command, "Enter"]);
+
+    let pane =
+        wait_for_tmux_pane_contains(&parent_session_name, "filter>", Duration::from_secs(10));
+
+    assert!(
+        pane.contains("Auto-attach failed for dc:"),
+        "Expected dashboard status message after attach failure\npane:\n{pane}"
+    );
+    assert!(
+        capture_tmux_pane(&parent_session_name).contains("filter>"),
+        "Expected dashboard output after attach failure\npane:\n{}",
+        capture_tmux_pane(&parent_session_name)
+    );
+    wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
+}
+
+#[test]
+fn bare_target_attach_falls_back_to_dashboard_when_attach_fails() {
+    let env = TestEnv::new("bare-target-fallback-on-attach-failure");
+    let fake_opencode = env.install_fake_opencode();
+    let parent_session_name = format!("{}parent", env.tmux_prefix());
+
+    create_saved_alias(&env, "dc", Some(env.root_dir()));
+    create_tmux_session_in_dir(&parent_session_name, env.root_dir());
+
+    let parent_command = format!(
+        "PATH=\"{}:{}\" OC_FAKE_OPENCODE_LOG_DIR=\"{}\" OC_ALIASES_FILE=\"{}\" OC_TMUX_PREFIX=\"{}\" OC_OPENCODE_DB=\"{}\" TMUX=nested-test {} dc",
+        fake_opencode.bin_dir().display(),
+        std::env::var("PATH").expect("PATH should exist for test"),
+        fake_opencode.log_dir().display(),
+        env.aliases_file().display(),
+        env.tmux_prefix(),
+        env.opencode_db().display(),
+        assert_cmd::cargo::cargo_bin("oc").display()
+    );
+    send_keys_to_tmux_session(&parent_session_name, &[&parent_command, "Enter"]);
+
+    let pane =
+        wait_for_tmux_pane_contains(&parent_session_name, "filter>", Duration::from_secs(10));
+
+    assert!(
+        pane.contains("Attach failed for dc:"),
+        "Expected dashboard fallback after target attach failure\npane:\n{pane}"
+    );
+    wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
+}
+
+#[test]
+fn new_session_falls_back_to_dashboard_when_attach_fails() {
+    let env = TestEnv::new("new-session-fallback-on-attach-failure");
+    let fake_opencode = env.install_fake_opencode();
+    let parent_session_name = format!("{}parent", env.tmux_prefix());
+
+    create_tmux_session_in_dir(&parent_session_name, env.root_dir());
+
+    let parent_command = format!(
+        "PATH=\"{}:{}\" OC_FAKE_OPENCODE_LOG_DIR=\"{}\" OC_ALIASES_FILE=\"{}\" OC_TMUX_PREFIX=\"{}\" OC_OPENCODE_DB=\"{}\" TMUX=nested-test {} new dc",
+        fake_opencode.bin_dir().display(),
+        std::env::var("PATH").expect("PATH should exist for test"),
+        fake_opencode.log_dir().display(),
+        env.aliases_file().display(),
+        env.tmux_prefix(),
+        env.opencode_db().display(),
+        assert_cmd::cargo::cargo_bin("oc").display()
+    );
+    send_keys_to_tmux_session(&parent_session_name, &[&parent_command, "Enter"]);
+
+    let pane =
+        wait_for_tmux_pane_contains(&parent_session_name, "filter>", Duration::from_secs(10));
+
+    assert!(
+        pane.contains("Attach failed for dc:"),
+        "Expected dashboard fallback after new-session attach failure\npane:\n{pane}"
+    );
+    wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
+    assert_saved_sessions(
+        &env,
+        vec![saved_session_row(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
+    );
 }
 
 fn assert_hidden_session_dump_status(env: &TestEnv, expected_status: &str) {
