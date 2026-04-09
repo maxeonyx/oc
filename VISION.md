@@ -48,7 +48,7 @@ Show whether OpenCode is actively working vs idle in each session, not just whet
 
 ### Memory usage
 
-Each session row shows the memory usage of the running OpenCode process (e.g. `523 MiB`). The bottom of the TUI shows column totals that react to the current filter:
+Each session row shows the memory usage of the running OpenCode process (e.g. `523 MiB`). Column totals sit at the **bottom of the session list**, well-separated from the sessions themselves, and react to the current filter:
 
 - **ID column total**: count of aliases matching the filter
 - **Status column total**: count of running OpenCode + tmux processes matching the filter
@@ -96,19 +96,29 @@ CLI-only commands (not surfaced in TUI — these are plumbing for tooling like `
 
 ### Keyboard interaction
 
-The command bar lives at the bottom of the TUI. Typing goes there.
+The input bar lives at the **top** of the TUI. Typing goes there.
 
-- **Up/down** to move between sessions
+- **Up/down** to move between sessions. When a filter is active, the highlight automatically tracks the top filtered result — but up/down can still override this to select a different row.
 - **Enter** to execute the current action for the highlighted row
-- **Left/right** to cycle through available actions for the highlighted row (attach, stop, rm, restart, etc.). Left/right should wrap.
+- **Left/right** to cycle through available actions (see action bar below). Left/right **skips** grayed-out (unavailable) actions and wraps.
 - **Type to filter** — narrows the session list (see filtering below)
-- **Space** — switches from filter mode to command mode, because session names can't contain spaces. If the typed text isn't a valid command, show an error.
+- **Space** — switches from filter mode to command mode, because session names can't contain spaces. The typed text carries over (e.g. typing `new` then space → command mode with `new ` as the input). If the submitted command isn't valid, show an error.
 - **Esc** clears the filter/command (or quits if nothing to clear)
+- **Ctrl-C** clears the input (does not quit)
+- **Ctrl-D** quits the TUI (only with empty input)
 - **Backspace** — if it removes the last space, immediately returns to filter mode
 
 No single-letter hotkeys. They conflict with type-to-filter.
 
-The **selected action** is shown prominently at the bottom of the screen — large and obvious. It persists when you move between rows (does not reset to default on row change). This makes repeated actions on multiple sessions fast.
+### Action bar
+
+All available actions (attach, stop, rm, restart) are shown as **separate items** in the action bar. Left/right moves a **highlight** across them to select which action Enter will execute. Unavailable actions (e.g. restart without a session ID, or stop on a saved session) are shown **grayed out**, not hidden — so the layout is stable and the user always knows what exists. Left/right skips unavailable actions.
+
+The selected action persists when you move between rows (does not reset to default on row change). This makes repeated actions on multiple sessions fast. If the persistent action becomes unavailable on the new row, the highlight auto-advances to the next available action.
+
+The input bar shows the current mode: `filter>` or `command>`. This is the primary indicator of which mode the user is in.
+
+A small **key help** line sits at the very bottom of the TUI.
 
 ### Numeric IDs
 
@@ -128,9 +138,9 @@ Sessions can be referenced by name or numeric ID interchangeably — `oc 3` and 
 
 ### Filtering and groups
 
-Typing filters the session list. Filtering matches against all fields: numeric ID, name, directory, and OpenCode session ID. Each session appears once, in the highest-priority group where it matched. Results are grouped by which field matched, in this order:
+Typing filters the session list. Filtering is **case-insensitive**. It matches against all fields: numeric ID, name, directory, and OpenCode session ID. Each session appears once, in the **highest-priority group** where it matched — group priority comes first, then match quality within the group. Results are grouped by which field matched, in this order:
 
-1. **Numeric ID matches** — only shows when the filter is a valid number or number-prefix
+1. **Numeric ID matches** — only shows when the filter is all digits
 2. **Name matches**
 3. **Directory matches**
 4. **OpenCode session ID matches** — pasting in a session ID like `ses_44b3d03b...` filters to the right session
@@ -139,6 +149,10 @@ Within each group, sort by match quality:
 1. Exact match
 2. Prefix match
 3. Contains match
+
+Ties within the same quality tier are broken by database order (numeric ID ascending).
+
+A session that has both a numeric-ID contains-match and a name exact-match still appears in the numeric ID group — group priority always wins.
 
 Example — typing `1`:
 
@@ -154,22 +168,41 @@ Example — typing `1`:
  43  fix-1            ← name contains "1"
 ```
 
-Enter selects the top filtered result. The numeric ID case falls out naturally from the grouping — an exact ID match is always first.
+**Enter selects the top filtered result** — not the previously-selected row. The type-filter-Enter flow must be predictable: the first match is always what you get. The numeric ID case falls out naturally from the grouping — an exact ID match is always first.
 
 When the filter is empty, all sessions are shown in a single ungrouped list.
 
-### "New session" is a row, not a hotkey
+### Session creation
 
-The session list includes a special "New session" row. Selecting it and pressing Enter starts the new-session flow (prompting for name, etc.) **inside the TUI**, not by closing the TUI and dropping to a shell prompt. Typing `new <name>` as a command is the direct/expert path; the row is the discoverable/guided path.
+New sessions are created via the `new` command — either on the CLI (`oc new myproject`) or typed in TUI command mode (space, then `new myproject`). There is no special "new session" row in the dashboard. Creating sessions from the TUI is rare — a new session almost always needs a directory, and you can't create directories from the TUI.
 
-Default selection when the dashboard opens depends on context:
-- **In `$HOME` or a directory with no matching sessions**: "New session" row is selected by default
-- **In a directory with multiple matching sessions**: the first matching session is selected. "New session" appears after the matches, before the remaining sessions.
+Default selection when the dashboard opens: the first session matching the current working directory, or the first session in the list if no directory match.
 
 ### Visual design
 
-- Must work in both light and dark terminal themes. Don't assume dark mode.
-- Clean layout with borders and summary header (counts of attached/detached/saved).
+The TUI should look like a modern terminal app — take inspiration from OpenCode's own UI.
+
+**Layout:** The dashboard is **centered in the terminal** and **sized to its content** — it should not fill the entire window. It expands as needed (more sessions → taller), but there's no empty space within the dashboard area. This means totals are always visible right below the last session row, not floating in a distant footer. When the session list exceeds the terminal height, the list scrolls and totals remain sticky at the bottom of the session area.
+
+**Layout order (top to bottom):**
+1. Input/filter bar
+2. Summary header (counts of attached/detached/saved — reacting to current filter when filtering, showing totals when in command mode or unfiltered)
+3. Session list with column headers
+4. Totals row (well-separated from sessions)
+5. Action bar
+6. Key help line
+
+**Borders and styling:** Panels are separated by **background color** — the terminal background is one color, and foreground panels are a different color. No line-drawing border characters (─│┌┐). To get clean vertical padding in a single terminal row, use **half-block characters** (▀▄) with the foreground/background colors set to the outer and inner panel colors respectively. This gives square padding edges on most terminals. See OpenCode's own TUI (visible in the `oc-oc-tui` tmux session) for the exact pattern.
+
+Use **colors** throughout — the tool needs visual richness, not just bold/dim/reverse. Must work in both light and dark terminal themes.
+
+**Information hierarchy:** Important information should be prominent; less important information should be subdued. Specifically:
+- Column headers should be clearly styled
+- Group headers (when filtering) should be **full-width** and **grayed out** — present but innocuous
+- Totals row should be visually distinct from sessions, well-separated
+- The input bar should have a visible cursor
+
+**Other:**
 - Dynamic column widths based on content.
 - Directory abbreviation: when the dir basename matches the session name, abbreviate to highlight only what's different.
 - Highlighted row should stand out clearly but not be garish.
@@ -211,13 +244,16 @@ Migration is an explicit user action (`oc migrate`), idempotent — safe to run 
 
 ## Learnings from prototyping
 
-Two throwaway Rust prototypes were built (one by GPT-5.4, one by Claude Opus) to test architectural choices. Key findings:
+Two throwaway Rust prototypes were built (one by GPT-5.4, one by Claude Opus), plus a v0.2.0 implementation that was feature-complete but visually wrong. Key findings:
 
 - **The TUI is the point.** A print-and-prompt Rust rewrite adds nothing over the fish version. The interactive dashboard with arrow navigation is the core value of the rewrite.
-- **Borders and summary header matter.** The version with a bordered layout and session-count summary (attached/detached/saved) felt significantly better than the plain one.
+- **Summary header matters.** Session-count summary (attached/detached/saved) gives immediate context.
 - **Light mode must work.** One prototype assumed dark terminal colors and was unreadable in light mode. Use colors that work in both.
-- **Left/right action cycling with wrapping feels right.** But the current action must be shown prominently at the bottom, not inline on the row (too subtle).
-- **Type-to-filter is great but kills hotkeys.** Can't have both 'n' for new and typing 'n' to filter. Solution: drop hotkeys entirely, make "New session" a selectable row.
-- **Don't close the TUI for new-session creation.** Prompt for name/args inside the TUI. Closing and reopening is jarring.
+- **Left/right action cycling with wrapping feels right.** Actions should be separate items with a moving highlight; unavailable actions grayed out, not hidden.
+- **Type-to-filter is great but kills hotkeys.** Can't have both 'n' for new and typing 'n' to filter. Solution: drop hotkeys entirely.
+- **"New session" row was wrong.** Creating sessions from the TUI is rare — a new session almost always needs a directory. Keep it as a command for the rare case.
+- **Line-drawing borders are ugly.** Use background-color panel separation with half-block transitions, like OpenCode's UI. Colors are essential — bold/dim/reverse alone looks lifeless.
+- **Full-window layout is too large.** Dashboard should be centered and sized to content, not filling the terminal.
+- **Input bar belongs at the top.** Matches the common mental model (type then see results below).
 - **`ratatui` + `crossterm` works well.** Both prototypes used this stack. `Paragraph` with `Line` spans gives better per-row control than ratatui's `Table` widget.
 - **All three session states must be visible.** Both prototypes initially missed showing saved-but-not-running aliases. The merged list (tmux sessions + saved aliases) is essential.
