@@ -31,6 +31,10 @@ Feature tests should set these through the shared harness rather than ad hoc env
 
 TDD is enforced via `cargo ratchet` (the `tdd-ratchet` crate). CI runs `cargo ratchet` instead of `cargo test` directly.
 
+### Tmux session cleanup
+
+Tests and fixture scripts create real tmux sessions. **Agents must verify no leaked tmux sessions remain after test runs or fixture use.** After running `cargo ratchet` or the test fixture script, check for leftover sessions with `tmux ls` and kill any that match the test/fixture prefix. The `TestEnv` harness handles cleanup for tests, but if a test crashes or an agent interrupts a run, sessions can leak.
+
 ## CI & release
 
 Single `.github/workflows/ci.yml` with 4 chained jobs: Check → Build → Release + Pages. Auto-releases on every push to main (no manual tagging). Version bumps are only required for artifact-affecting changes; run `scripts/check-version-bump.py` when changing the release policy.
