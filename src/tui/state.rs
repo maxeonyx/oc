@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -14,13 +14,13 @@ use std::time::{Duration, Instant};
 use crate::commands;
 use crate::service::SessionService;
 
-use super::command::{parse_command, CommandParseError};
+use super::command::{CommandParseError, parse_command};
 use super::filter::{build_view, summary_for_view, totals_scope_label};
-use super::input::{map_key_event, InputIntent};
+use super::input::{InputIntent, map_key_event};
 use super::render;
 use super::selection::{
-    available_actions, cycle_action_for_row, preferred_action_for_row, select_index_for_input,
-    SelectedSession,
+    SelectedSession, available_actions, cycle_action_for_row, preferred_action_for_row,
+    select_index_for_input,
 };
 use super::types::{
     DashboardAction, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,

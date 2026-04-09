@@ -2,9 +2,9 @@ use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Widget};
-use ratatui::{layout::Direction, Frame};
+use ratatui::{Frame, layout::Direction};
 
-use super::format::{format_column_row, format_memory, ColumnWidths};
+use super::format::{ColumnWidths, format_column_row, format_memory};
 use super::selection::action_label;
 use super::state::DashboardState;
 use super::types::{ActionState, CursorPosition, DashboardAction, DashboardGroup, InputMode};
