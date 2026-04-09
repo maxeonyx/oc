@@ -1,115 +1,162 @@
-use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Modifier, Style};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Clear, Paragraph, Widget};
 use ratatui::{layout::Direction, Frame};
 
 use super::format::{format_column_row, format_memory, ColumnWidths};
 use super::selection::action_label;
 use super::state::DashboardState;
-use super::types::{ActionState, DashboardAction, InputMode};
+use super::types::{ActionState, CursorPosition, DashboardAction, DashboardGroup, InputMode};
+
+const OUTER_BG: Color = Color::Reset;
+const PANEL_BG: Color = Color::DarkGray;
+const PANEL_TEXT: Color = Color::Gray;
+const MUTED_TEXT: Color = Color::DarkGray;
+const ACCENT: Color = Color::Cyan;
+const SUCCESS: Color = Color::Green;
+const WARNING: Color = Color::Yellow;
+const SELECTION_BG: Color = Color::Blue;
+const HELP_TEXT: Color = Color::Gray;
 
 pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
-    let areas = Layout::default()
+    let layout = compute_layout(frame.area(), state);
+
+    frame.render_widget(Clear, layout.outer);
+    fill_rect(frame, layout.outer, Style::default().bg(OUTER_BG));
+
+    render_panel(frame, layout.input, render_input_bar(state));
+    render_separator(frame, layout.input_separator, true);
+    render_panel(frame, layout.summary, render_summary(state));
+    render_separator(frame, layout.summary_separator, true);
+    render_panel(
+        frame,
+        layout.list,
+        render_sessions(state, layout.list_inner.height as usize),
+    );
+    render_separator(frame, layout.list_separator, true);
+    render_panel(frame, layout.totals, render_totals(state));
+    render_separator(frame, layout.totals_separator, true);
+    render_panel(frame, layout.actions, render_action_bar(state));
+    render_separator(frame, layout.actions_separator, true);
+    render_panel(frame, layout.help, render_help_line());
+
+    let cursor = input_cursor_position(layout.input_inner, state);
+    frame.set_cursor_position((cursor.x, cursor.y));
+}
+
+fn compute_layout(area: Rect, state: &DashboardState) -> DashboardLayout {
+    let session_lines = session_lines(state).len().max(1) as u16;
+    let list_height = session_lines.min(area.height.saturating_sub(12)).max(3);
+    let min_height = 14u16.min(area.height.max(1));
+    let desired_height = 15u16 + list_height.saturating_sub(1);
+    let outer_height = desired_height.min(area.height).max(min_height);
+
+    let widths = column_widths(state);
+    let content_width =
+        format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", &widths).len() as u16 + 4;
+    let outer_width = content_width.min(area.width.saturating_sub(2)).max(40);
+
+    let outer = centered_rect(area, outer_width, outer_height);
+    let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Min(8),
-            Constraint::Length(4),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(list_height + 2),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
         ])
-        .split(frame.area());
+        .split(outer);
 
-    frame.render_widget(render_summary(state), areas[0]);
-    frame.render_widget(render_sessions(state), areas[1]);
-    frame.render_widget(render_action_bar(state), areas[2]);
-    frame.render_widget(render_input_bar(state), areas[3]);
+    DashboardLayout {
+        outer,
+        input: sections[0],
+        input_inner: inner_panel_rect(sections[0]),
+        input_separator: sections[1],
+        summary: sections[2],
+        summary_separator: sections[3],
+        list: sections[4],
+        list_inner: inner_panel_rect(sections[4]),
+        list_separator: sections[5],
+        totals: sections[6],
+        totals_separator: sections[7],
+        actions: sections[8],
+        actions_separator: sections[9],
+        help: sections[10],
+    }
 }
 
 fn render_summary(state: &DashboardState) -> Paragraph<'static> {
-    let summary = &state.snapshot.summary;
+    let summary = state.summary();
     Paragraph::new(Line::from(vec![
-        Span::raw(format!("Attached: {}", summary.attached)),
+        Span::styled(
+            format!("Attached {}", summary.attached),
+            Style::default().fg(SUCCESS),
+        ),
         Span::raw("  "),
-        Span::raw(format!("Detached: {}", summary.detached)),
+        Span::styled(
+            format!("Detached {}", summary.detached),
+            Style::default().fg(WARNING),
+        ),
         Span::raw("  "),
-        Span::raw(format!("Saved: {}", summary.saved)),
+        Span::styled(
+            format!("Saved {}", summary.saved),
+            Style::default().fg(ACCENT),
+        ),
     ]))
-    .block(Block::default().borders(Borders::ALL).title("Sessions"))
+    .style(Style::default().bg(PANEL_BG).fg(PANEL_TEXT))
 }
 
-fn render_sessions(state: &DashboardState) -> Paragraph<'static> {
+fn render_sessions(state: &DashboardState, max_lines: usize) -> Paragraph<'static> {
+    let lines = visible_session_lines(state, max_lines);
+
+    Paragraph::new(lines)
+        .style(Style::default().bg(PANEL_BG).fg(PANEL_TEXT))
+        .alignment(Alignment::Left)
+}
+
+fn render_totals(state: &DashboardState) -> Paragraph<'static> {
     let widths = column_widths(state);
-
-    let mut lines = vec![Line::from(Span::styled(
-        format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", &widths),
-        Style::default().add_modifier(Modifier::BOLD | Modifier::DIM),
-    ))];
-
-    let mut session_index = 0;
-    for group in &state.view.groups {
-        if let Some(title) = &group.title {
-            lines.push(Line::from(Span::styled(
-                format!("─ {title} ─"),
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
-        }
-
-        for row in &group.sessions {
-            lines.push(Line::from(Span::styled(
-                format_column_row(
-                    &row.session_id.to_string(),
-                    &row.name,
-                    row.status_label(),
-                    &row.memory_label(),
-                    &row.directory,
-                    &widths,
-                ),
-                selection_style(session_index == state.selected_index),
-            )));
-            session_index += 1;
-        }
-    }
-
-    lines.push(Line::from(Span::styled(
+    Paragraph::new(Line::from(Span::styled(
         format_column_row(
             &state.view.totals.filtered_sessions.to_string(),
             "total sessions",
             &state.view.totals.filtered_running.to_string(),
             &format_memory(state.view.totals.filtered_memory_bytes),
-            "filtered",
+            state.totals_scope_label(),
             &widths,
         ),
-        Style::default().add_modifier(Modifier::DIM | Modifier::BOLD),
-    )));
-
-    Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Dashboard"))
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+    )))
+    .style(Style::default().bg(PANEL_BG).fg(PANEL_TEXT))
 }
 
 fn render_action_bar(state: &DashboardState) -> Paragraph<'static> {
     let action_states = action_states(state);
     let selected = action_label(state.selected_action);
-    let actions = action_states
-        .iter()
-        .map(render_action_label)
-        .collect::<Vec<_>>()
-        .join("   ");
+    let mut action_spans = Vec::new();
+    for (index, action_state) in action_states.iter().enumerate() {
+        if index > 0 {
+            action_spans.push(Span::raw("  "));
+        }
+        action_spans.push(render_action_label(action_state));
+    }
 
     Paragraph::new(vec![
-        Line::from(Span::styled(
-            format!("←  {selected:^12}  →"),
-            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            format!("ENTER runs selected action    {actions}"),
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
+        Line::from(action_spans),
+        Line::from(vec![
+            Span::styled("Enter ", Style::default().fg(ACCENT)),
+            Span::styled(format!("runs {selected}"), Style::default().fg(MUTED_TEXT)),
+        ]),
     ])
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Current Action"),
-    )
+    .style(Style::default().bg(PANEL_BG).fg(PANEL_TEXT))
 }
 
 fn render_input_bar(state: &DashboardState) -> Paragraph<'static> {
@@ -120,17 +167,41 @@ fn render_input_bar(state: &DashboardState) -> Paragraph<'static> {
 
     let status = state.status_message.clone().unwrap_or_default();
     Paragraph::new(vec![
-        Line::from(Span::raw(format!("{mode}> {}", state.input_text))),
-        Line::from(Span::raw(status)),
+        Line::from(vec![
+            Span::styled(format!("{mode}> "), Style::default().fg(ACCENT)),
+            Span::styled(state.input_text.clone(), Style::default().fg(PANEL_TEXT)),
+        ]),
+        Line::from(Span::styled(status, Style::default().fg(MUTED_TEXT))),
     ])
-    .block(Block::default().borders(Borders::ALL).title("Input"))
+    .style(Style::default().bg(PANEL_BG).fg(PANEL_TEXT))
 }
 
-fn selection_style(selected: bool) -> Style {
+fn render_help_line() -> Paragraph<'static> {
+    Paragraph::new(Line::from(vec![
+        Span::styled("↑↓ ", Style::default().fg(ACCENT)),
+        Span::styled("select  ", Style::default().fg(HELP_TEXT)),
+        Span::styled("←→ ", Style::default().fg(ACCENT)),
+        Span::styled("action  ", Style::default().fg(HELP_TEXT)),
+        Span::styled("Enter ", Style::default().fg(ACCENT)),
+        Span::styled("run  ", Style::default().fg(HELP_TEXT)),
+        Span::styled("Space ", Style::default().fg(ACCENT)),
+        Span::styled("command  ", Style::default().fg(HELP_TEXT)),
+        Span::styled("Esc ", Style::default().fg(ACCENT)),
+        Span::styled("clear/quit  ", Style::default().fg(HELP_TEXT)),
+        Span::styled("Ctrl-D ", Style::default().fg(ACCENT)),
+        Span::styled("quit", Style::default().fg(HELP_TEXT)),
+    ]))
+    .style(Style::default().bg(PANEL_BG).fg(PANEL_TEXT))
+}
+
+fn selection_style(selected: bool, status: &str) -> Style {
     if selected {
-        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-    } else {
         Style::default()
+            .fg(Color::Black)
+            .bg(SELECTION_BG)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(status_color(status)).bg(PANEL_BG)
     }
 }
 
@@ -172,11 +243,215 @@ fn action_states(state: &DashboardState) -> Vec<ActionState> {
         .collect()
 }
 
-fn render_action_label(action_state: &ActionState) -> String {
+fn render_action_label(action_state: &ActionState) -> Span<'static> {
     match (action_state.selected, action_state.enabled) {
-        (true, true) => format!("[{label}]", label = action_label(action_state.action)),
-        (true, false) => format!("({label})", label = action_label(action_state.action)),
-        (false, true) => String::from(action_label(action_state.action)),
-        (false, false) => format!("-{label}-", label = action_label(action_state.action)),
+        (true, true) => Span::styled(
+            format!(" {} ", action_label(action_state.action)),
+            Style::default()
+                .fg(Color::Black)
+                .bg(ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        (true, false) => Span::styled(
+            format!(" {} ", action_label(action_state.action)),
+            Style::default()
+                .fg(MUTED_TEXT)
+                .bg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
+        ),
+        (false, true) => Span::styled(
+            format!(" {} ", action_label(action_state.action)),
+            Style::default().fg(PANEL_TEXT).bg(Color::Black),
+        ),
+        (false, false) => Span::styled(
+            format!(" {} ", action_label(action_state.action)),
+            Style::default().fg(MUTED_TEXT).bg(PANEL_BG),
+        ),
     }
+}
+
+fn render_panel(frame: &mut Frame<'_>, area: Rect, paragraph: Paragraph<'_>) {
+    fill_rect(frame, area, Style::default().bg(PANEL_BG));
+    paragraph.render(inner_panel_rect(area), frame.buffer_mut());
+}
+
+fn fill_rect(frame: &mut Frame<'_>, area: Rect, style: Style) {
+    for y in area.top()..area.bottom() {
+        let line = " ".repeat(area.width as usize);
+        Paragraph::new(Line::from(Span::styled(line, style)))
+            .render(Rect::new(area.x, y, area.width, 1), frame.buffer_mut());
+    }
+}
+
+fn render_separator(frame: &mut Frame<'_>, area: Rect, top_panel: bool) {
+    if area.height == 0 {
+        return;
+    }
+
+    let ch = if top_panel { '▄' } else { '▀' };
+    let fg = if top_panel { PANEL_BG } else { OUTER_BG };
+    let bg = if top_panel { OUTER_BG } else { PANEL_BG };
+    let line = ch.to_string().repeat(area.width as usize);
+    Paragraph::new(Line::from(Span::styled(
+        line,
+        Style::default().fg(fg).bg(bg),
+    )))
+    .render(area, frame.buffer_mut());
+}
+
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(width),
+            Constraint::Fill(1),
+        ])
+        .split(area);
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(height),
+            Constraint::Fill(1),
+        ])
+        .split(horizontal[1]);
+    vertical[1]
+}
+
+fn inner_panel_rect(area: Rect) -> Rect {
+    area.inner(Margin {
+        horizontal: 1,
+        vertical: if area.height > 2 { 1 } else { 0 },
+    })
+}
+
+fn session_lines(state: &DashboardState) -> Vec<Line<'static>> {
+    let widths = column_widths(state);
+    let mut lines = vec![Line::from(Span::styled(
+        format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", &widths),
+        Style::default()
+            .fg(ACCENT)
+            .bg(PANEL_BG)
+            .add_modifier(Modifier::BOLD),
+    ))];
+
+    let mut session_index = 0;
+    for group in &state.view.groups {
+        append_group_lines(
+            &mut lines,
+            group,
+            &widths,
+            state.selected_index,
+            &mut session_index,
+        );
+    }
+    lines
+}
+
+fn append_group_lines(
+    lines: &mut Vec<Line<'static>>,
+    group: &DashboardGroup,
+    widths: &ColumnWidths,
+    selected_index: usize,
+    session_index: &mut usize,
+) {
+    if let Some(title) = &group.title {
+        let header_width =
+            format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", widths).len();
+        lines.push(Line::from(Span::styled(
+            format!("{title:<header_width$}"),
+            Style::default().fg(MUTED_TEXT).bg(PANEL_BG),
+        )));
+    }
+
+    for row in &group.sessions {
+        lines.push(Line::from(Span::styled(
+            format_column_row(
+                &row.session_id.to_string(),
+                &row.name,
+                row.status_label(),
+                &row.memory_label(),
+                &row.directory,
+                widths,
+            ),
+            selection_style(*session_index == selected_index, row.status_label()),
+        )));
+        *session_index += 1;
+    }
+}
+
+fn visible_session_lines(state: &DashboardState, max_lines: usize) -> Vec<Line<'static>> {
+    let all_lines = session_lines(state);
+    if all_lines.len() <= max_lines {
+        return all_lines;
+    }
+
+    let selected_line = selected_line_index(state);
+    let scroll = selected_line.saturating_sub(max_lines.saturating_sub(2));
+    let header = all_lines[0].clone();
+    let visible_body = all_lines
+        .into_iter()
+        .skip(scroll.max(1))
+        .take(max_lines.saturating_sub(1))
+        .collect::<Vec<_>>();
+
+    std::iter::once(header).chain(visible_body).collect()
+}
+
+fn selected_line_index(state: &DashboardState) -> usize {
+    let mut line_index = 1;
+    let mut session_index = 0;
+    for group in &state.view.groups {
+        if group.title.is_some() {
+            line_index += 1;
+        }
+        for _row in &group.sessions {
+            if session_index == state.selected_index {
+                return line_index;
+            }
+            session_index += 1;
+            line_index += 1;
+        }
+    }
+    1
+}
+
+fn status_color(status: &str) -> Color {
+    match status {
+        "attached" => SUCCESS,
+        "detached" => WARNING,
+        "saved" => ACCENT,
+        _ => PANEL_TEXT,
+    }
+}
+
+fn input_cursor_position(area: Rect, state: &DashboardState) -> CursorPosition {
+    let mode_len = match state.input_mode {
+        InputMode::Filter => "filter> ".len(),
+        InputMode::Command => "command> ".len(),
+    } as u16;
+
+    CursorPosition {
+        x: area.x + mode_len + state.input_text.chars().count() as u16,
+        y: area.y,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct DashboardLayout {
+    outer: Rect,
+    input: Rect,
+    input_inner: Rect,
+    input_separator: Rect,
+    summary: Rect,
+    summary_separator: Rect,
+    list: Rect,
+    list_inner: Rect,
+    list_separator: Rect,
+    totals: Rect,
+    totals_separator: Rect,
+    actions: Rect,
+    actions_separator: Rect,
+    help: Rect,
 }

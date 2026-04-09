@@ -7,6 +7,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::commands;
@@ -35,6 +37,12 @@ pub struct DashboardState {
     pub input_text: String,
     pub status_message: Option<String>,
     pub current_directory: Option<PathBuf>,
+    pending_restart: Option<PendingRestart>,
+}
+
+struct PendingRestart {
+    target: String,
+    receiver: Receiver<Result<()>>,
 }
 
 pub fn run(service: &SessionService) -> Result<()> {
@@ -50,6 +58,7 @@ pub fn run(service: &SessionService) -> Result<()> {
     let mut last_refresh = Instant::now();
 
     loop {
+        state.poll_background_work(service)?;
         terminal.draw(|frame| render::render(frame, &state))?;
 
         let wait = POLL_INTERVAL.saturating_sub(last_refresh.elapsed());
@@ -136,6 +145,7 @@ impl DashboardState {
             input_text,
             status_message,
             current_directory,
+            pending_restart: None,
         };
 
         state.reconcile_selected_action();
@@ -145,6 +155,7 @@ impl DashboardState {
     fn refresh(&mut self, service: &SessionService) -> Result<()> {
         let selected_identity = self.selected_session();
         let preferred_action = self.selected_action;
+        let pending_restart = self.pending_restart.take();
         *self = Self::load(
             service,
             selected_identity,
@@ -153,6 +164,7 @@ impl DashboardState {
             self.input_text.clone(),
             self.status_message.clone(),
         )?;
+        self.pending_restart = pending_restart;
         Ok(())
     }
 
@@ -270,7 +282,10 @@ impl DashboardState {
             DashboardAction::Attach => service.activate_target(&target)?,
             DashboardAction::Stop => service.stop_session(&target)?,
             DashboardAction::Remove => service.remove_session(&target)?,
-            DashboardAction::Restart => service.restart_session(&target)?,
+            DashboardAction::Restart => {
+                self.begin_restart(service, target);
+                return Ok(());
+            }
         }
 
         self.refresh(service)
@@ -293,6 +308,59 @@ impl DashboardState {
         self.status_message = None;
         self.refresh(service)?;
         Ok(false)
+    }
+
+    fn begin_restart(&mut self, service: &SessionService, target: String) {
+        if self.pending_restart.is_some() {
+            self.status_message = Some(String::from("Restart already in progress"));
+            return;
+        }
+
+        let (sender, receiver) = mpsc::channel();
+        let service = service.clone();
+        let target_for_thread = target.clone();
+        thread::spawn(move || {
+            let result = service.restart_session(&target_for_thread);
+            let _ = sender.send(result);
+        });
+
+        self.pending_restart = Some(PendingRestart {
+            target: target.clone(),
+            receiver,
+        });
+        self.status_message = Some(format!("Restarting session {target}..."));
+    }
+
+    fn poll_background_work(&mut self, service: &SessionService) -> Result<()> {
+        let Some(pending_restart) = self.pending_restart.take() else {
+            return Ok(());
+        };
+
+        match pending_restart.receiver.try_recv() {
+            Ok(Ok(())) => {
+                self.status_message = Some(format!("Restarted session {}", pending_restart.target));
+                self.refresh(service)?;
+            }
+            Ok(Err(error)) => {
+                self.status_message = Some(format!(
+                    "Restart failed for {}: {error:#}",
+                    pending_restart.target
+                ));
+                self.refresh(service)?;
+            }
+            Err(TryRecvError::Empty) => {
+                self.pending_restart = Some(pending_restart);
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.status_message = Some(format!(
+                    "Restart failed for {}: worker disconnected",
+                    pending_restart.target
+                ));
+                self.refresh(service)?;
+            }
+        }
+
+        Ok(())
     }
 }
 

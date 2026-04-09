@@ -60,6 +60,12 @@ pub struct ActionState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CursorPosition {
+    pub x: u16,
+    pub y: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Filter,
     Command,
