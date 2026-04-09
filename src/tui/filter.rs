@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use super::format::format_memory;
 use super::types::{
     DashboardGroup, DashboardRow, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,
 };
@@ -26,11 +25,10 @@ pub fn build_view(
     input_mode: InputMode,
     current_directory: Option<PathBuf>,
 ) -> DashboardView {
-    let filter_active = input_mode == InputMode::Filter && !filter_text.is_empty();
-    let groups = if input_mode == InputMode::Command || filter_text.is_empty() {
-        groups_without_filter(snapshot, current_directory.as_deref())
-    } else {
+    let groups = if is_active_filter(input_mode, filter_text) {
         groups_with_filter(snapshot, filter_text)
+    } else {
+        groups_without_filter(snapshot, current_directory.as_deref())
     };
 
     let totals = totals_for_rows(
@@ -38,11 +36,7 @@ pub fn build_view(
         groups.iter().flat_map(|group| group.sessions.iter()),
     );
 
-    DashboardView {
-        groups,
-        totals,
-        filter_active,
-    }
+    DashboardView { groups, totals }
 }
 
 pub fn totals_for_rows<'a>(
@@ -65,17 +59,8 @@ pub fn totals_for_rows<'a>(
     totals
 }
 
-pub fn totals_label(summary: &DashboardSummary) -> String {
-    format!(
-        "{} sessions  {} running  {}",
-        summary.filtered_sessions,
-        summary.filtered_running,
-        format_memory(summary.filtered_memory_bytes)
-    )
-}
-
 pub fn totals_scope_label(input_mode: InputMode, input_text: &str) -> &'static str {
-    if input_mode == InputMode::Filter && !input_text.is_empty() {
+    if is_active_filter(input_mode, input_text) {
         "filtered"
     } else {
         "all sessions"
@@ -88,7 +73,7 @@ pub fn summary_for_view(
     input_mode: InputMode,
     input_text: &str,
 ) -> DashboardSummary {
-    if input_mode == InputMode::Filter && !input_text.is_empty() {
+    if is_active_filter(input_mode, input_text) {
         let mut filtered_summary = summary.clone();
         filtered_summary.attached = 0;
         filtered_summary.detached = 0;
@@ -263,4 +248,8 @@ impl MatchGroup {
             Self::OpencodeSessionId => "opencode session id",
         }
     }
+}
+
+fn is_active_filter(input_mode: InputMode, input_text: &str) -> bool {
+    input_mode == InputMode::Filter && !input_text.is_empty()
 }

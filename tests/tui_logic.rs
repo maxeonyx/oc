@@ -1,6 +1,6 @@
 use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
-use oc::tui::command::{CommandParseError, parse_command};
+use oc::tui::command::{parse_command, CommandParseError};
 use oc::tui::filter::{build_view, summary_for_view, totals_for_rows, totals_scope_label};
 use oc::tui::selection::{
     cycle_action_for_row, preferred_action_for_row, select_index, select_index_for_input,
@@ -76,7 +76,7 @@ fn filter_uses_highest_priority_match_only_once() {
 }
 
 #[test]
-fn empty_filter_shows_new_row_then_sessions_when_no_directory_match() {
+fn empty_filter_shows_sessions_when_no_directory_match() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![
         session_entry(1, "alpha", "/tmp/alpha", None, SessionStatus::Saved),
         session_entry(2, "beta", "/tmp/beta", None, SessionStatus::Saved),
@@ -88,7 +88,7 @@ fn empty_filter_shows_new_row_then_sessions_when_no_directory_match() {
 }
 
 #[test]
-fn empty_filter_places_new_row_after_directory_matches() {
+fn empty_filter_places_directory_matches_first() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![
         session_entry(1, "alpha", "/work/alpha", None, SessionStatus::Saved),
         session_entry(2, "beta", "/tmp/beta", None, SessionStatus::Saved),
@@ -227,7 +227,7 @@ fn totals_only_count_session_rows() {
 }
 
 #[test]
-fn default_selection_prefers_new_session_without_directory_match() {
+fn default_selection_prefers_first_session_without_directory_match() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![
         session_entry(1, "alpha", "/tmp/alpha", None, SessionStatus::Saved),
         session_entry(2, "beta", "/tmp/beta", None, SessionStatus::Saved),
@@ -238,7 +238,7 @@ fn default_selection_prefers_new_session_without_directory_match() {
 }
 
 #[test]
-fn default_selection_prefers_directory_match_before_new_session() {
+fn default_selection_prefers_directory_match_first() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![
         session_entry(1, "alpha", "/work/project", None, SessionStatus::Saved),
         session_entry(2, "beta", "/tmp/beta", None, SessionStatus::Saved),

@@ -19,6 +19,14 @@ const SUCCESS: Color = Color::Green;
 const WARNING: Color = Color::Yellow;
 const SELECTION_BG: Color = Color::Blue;
 const HELP_TEXT: Color = Color::Gray;
+const PANEL_HORIZONTAL_PADDING: u16 = 1;
+const PANEL_VERTICAL_PADDING: u16 = 1;
+const SECTION_INPUT_HEIGHT: u16 = 3;
+const SECTION_SUMMARY_HEIGHT: u16 = 1;
+const SECTION_TOTALS_HEIGHT: u16 = 1;
+const SECTION_ACTIONS_HEIGHT: u16 = 4;
+const SECTION_HELP_HEIGHT: u16 = 1;
+const SECTION_SEPARATOR_HEIGHT: u16 = 1;
 
 pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
     let layout = compute_layout(frame.area(), state);
@@ -48,9 +56,11 @@ pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
 
 fn compute_layout(area: Rect, state: &DashboardState) -> DashboardLayout {
     let session_lines = session_lines(state).len().max(1) as u16;
-    let list_height = session_lines.min(area.height.saturating_sub(17)).max(3);
-    let min_height = 14u16.min(area.height.max(1));
-    let desired_height = 17u16 + list_height;
+    let list_height = session_lines
+        .min(area.height.saturating_sub(fixed_section_height()))
+        .max(3);
+    let min_height = minimum_panel_height().min(area.height.max(1));
+    let desired_height = fixed_section_height() + list_height;
     let outer_height = desired_height.min(area.height).max(min_height);
 
     let content_width = content_width(state) + 2;
@@ -60,17 +70,17 @@ fn compute_layout(area: Rect, state: &DashboardState) -> DashboardLayout {
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(SECTION_INPUT_HEIGHT),
+            Constraint::Length(SECTION_SEPARATOR_HEIGHT),
+            Constraint::Length(SECTION_SUMMARY_HEIGHT),
+            Constraint::Length(SECTION_SEPARATOR_HEIGHT),
             Constraint::Length(list_height + 2),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(4),
-            Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(SECTION_SEPARATOR_HEIGHT),
+            Constraint::Length(SECTION_TOTALS_HEIGHT),
+            Constraint::Length(SECTION_SEPARATOR_HEIGHT),
+            Constraint::Length(SECTION_ACTIONS_HEIGHT),
+            Constraint::Length(SECTION_SEPARATOR_HEIGHT),
+            Constraint::Length(SECTION_HELP_HEIGHT),
         ])
         .split(outer);
 
@@ -323,8 +333,12 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
 
 fn inner_panel_rect(area: Rect) -> Rect {
     area.inner(Margin {
-        horizontal: 1,
-        vertical: if area.height > 2 { 1 } else { 0 },
+        horizontal: PANEL_HORIZONTAL_PADDING,
+        vertical: if area.height > 2 {
+            PANEL_VERTICAL_PADDING
+        } else {
+            0
+        },
     })
 }
 
@@ -525,6 +539,29 @@ fn input_cursor_position(area: Rect, state: &DashboardState) -> CursorPosition {
         x: area.x + mode_len + state.input_text.chars().count() as u16,
         y: area.y,
     }
+}
+
+fn fixed_section_height() -> u16 {
+    SECTION_INPUT_HEIGHT
+        + SECTION_SUMMARY_HEIGHT
+        + SECTION_TOTALS_HEIGHT
+        + SECTION_ACTIONS_HEIGHT
+        + SECTION_HELP_HEIGHT
+        + (SECTION_SEPARATOR_HEIGHT * 5)
+}
+
+fn minimum_panel_height() -> u16 {
+    SECTION_INPUT_HEIGHT
+        + SECTION_SEPARATOR_HEIGHT
+        + SECTION_SUMMARY_HEIGHT
+        + SECTION_SEPARATOR_HEIGHT
+        + 3
+        + SECTION_SEPARATOR_HEIGHT
+        + SECTION_TOTALS_HEIGHT
+        + SECTION_SEPARATOR_HEIGHT
+        + SECTION_ACTIONS_HEIGHT
+        + SECTION_SEPARATOR_HEIGHT
+        + SECTION_HELP_HEIGHT
 }
 
 #[derive(Clone, Copy)]

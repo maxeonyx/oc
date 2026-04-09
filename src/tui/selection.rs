@@ -1,5 +1,3 @@
-use crate::session::SessionStatus;
-
 use super::types::{DashboardAction, DashboardRow, DashboardView, InputMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,13 +109,5 @@ pub fn action_label(action: DashboardAction) -> &'static str {
         DashboardAction::Stop => "STOP",
         DashboardAction::Remove => "RM",
         DashboardAction::Restart => "RESTART",
-    }
-}
-
-pub fn status_label(status: SessionStatus) -> &'static str {
-    match status {
-        SessionStatus::RunningAttached => "attached",
-        SessionStatus::RunningDetached => "detached",
-        SessionStatus::Saved => "saved",
     }
 }
