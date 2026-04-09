@@ -2,9 +2,10 @@ use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Widget};
-use ratatui::{Frame, layout::Direction};
+use ratatui::{layout::Direction, Frame};
+use unicode_width::UnicodeWidthStr;
 
-use super::format::{ColumnWidths, format_column_row, format_memory};
+use super::format::{format_column_row, format_memory, ColumnWidths};
 use super::selection::action_label;
 use super::state::DashboardState;
 use super::types::{ActionState, CursorPosition, DashboardAction, DashboardGroup, InputMode};
@@ -47,9 +48,9 @@ pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
 
 fn compute_layout(area: Rect, state: &DashboardState) -> DashboardLayout {
     let session_lines = session_lines(state).len().max(1) as u16;
-    let list_height = session_lines.min(area.height.saturating_sub(16)).max(3);
+    let list_height = session_lines.min(area.height.saturating_sub(17)).max(3);
     let min_height = 14u16.min(area.height.max(1));
-    let desired_height = 16u16 + list_height;
+    let desired_height = 17u16 + list_height;
     let outer_height = desired_height.min(area.height).max(min_height);
 
     let content_width = content_width(state) + 2;
@@ -67,7 +68,7 @@ fn compute_layout(area: Rect, state: &DashboardState) -> DashboardLayout {
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Length(1),
             Constraint::Length(1),
         ])
@@ -430,25 +431,23 @@ fn status_color(status: &str) -> Color {
 fn content_width(state: &DashboardState) -> u16 {
     let widths = column_widths(state);
 
-    let summary_width = format!(
+    let summary_width = display_width(&format!(
         "Attached {}  Detached {}  Saved {}",
         state.summary().attached,
         state.summary().detached,
         state.summary().saved
-    )
-    .len() as u16;
+    ));
 
-    let input_width = format!(
+    let input_width = display_width(&format!(
         "{}> {}",
         match state.input_mode {
             InputMode::Filter => "filter",
             InputMode::Command => "command",
         },
         state.input_text
-    )
-    .len() as u16;
+    ));
 
-    let status_width = state.status_message.as_deref().unwrap_or("").len() as u16;
+    let status_width = display_width(state.status_message.as_deref().unwrap_or(""));
 
     let session_width = session_lines(state)
         .iter()
@@ -456,19 +455,20 @@ fn content_width(state: &DashboardState) -> u16 {
         .max()
         .unwrap_or(0);
 
-    let totals_width = format_column_row(
+    let totals_width = display_width(&format_column_row(
         &state.view.totals.filtered_sessions.to_string(),
         "total sessions",
         &state.view.totals.filtered_running.to_string(),
         &format_memory(state.view.totals.filtered_memory_bytes),
         state.totals_scope_label(),
         &widths,
-    )
-    .len() as u16;
+    ));
 
     let actions_width = action_line_width(state);
-    let action_hint_width =
-        format!("Enter runs {}", action_label(state.selected_action)).len() as u16;
+    let action_hint_width = display_width(&format!(
+        "Enter runs {}",
+        action_label(state.selected_action)
+    ));
     let help_width = help_line_width();
 
     [
@@ -489,7 +489,7 @@ fn content_width(state: &DashboardState) -> u16 {
 fn line_width(line: &Line<'_>) -> u16 {
     line.spans
         .iter()
-        .map(|span| span.content.len() as u16)
+        .map(|span| display_width(&span.content))
         .sum()
 }
 
@@ -501,14 +501,18 @@ fn action_line_width(state: &DashboardState) -> u16 {
             width += 2;
         }
         width += match (action_state.selected, action_state.enabled) {
-            (true, _) | (false, _) => action_label(action_state.action).len() as u16 + 2,
+            (true, _) | (false, _) => display_width(action_label(action_state.action)) + 2,
         };
     }
     width
 }
 
 fn help_line_width() -> u16 {
-    "↑↓ select  ←→ action  Enter run  Space command  Esc clear/quit  Ctrl-D quit".len() as u16
+    display_width("↑↓ select  ←→ action  Enter run  Space command  Esc clear/quit  Ctrl-D quit")
+}
+
+fn display_width(text: &str) -> u16 {
+    UnicodeWidthStr::width(text) as u16
 }
 
 fn input_cursor_position(area: Rect, state: &DashboardState) -> CursorPosition {
