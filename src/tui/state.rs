@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -14,13 +14,13 @@ use std::time::{Duration, Instant};
 use crate::commands;
 use crate::service::SessionService;
 
-use super::command::{CommandParseError, parse_command};
+use super::command::{parse_command, CommandParseError};
 use super::filter::{build_view, summary_for_view, totals_scope_label};
-use super::input::{InputIntent, map_key_event};
+use super::input::{map_key_event, InputIntent};
 use super::render;
 use super::selection::{
-    SelectedSession, available_actions, cycle_action_for_row, preferred_action_for_row,
-    select_index_for_input,
+    available_actions, cycle_action_for_row, preferred_action_for_row, select_index_for_input,
+    SelectedSession,
 };
 use super::types::{
     DashboardAction, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,
@@ -45,7 +45,7 @@ struct PendingRestart {
     receiver: Receiver<Result<()>>,
 }
 
-pub fn run(service: &SessionService) -> Result<()> {
+pub fn run(service: &SessionService, status_message: Option<String>) -> Result<()> {
     let mut terminal = TerminalGuard::enter()?;
     let mut state = DashboardState::load(
         service,
@@ -53,7 +53,7 @@ pub fn run(service: &SessionService) -> Result<()> {
         DashboardAction::Attach,
         InputMode::Filter,
         String::new(),
-        None,
+        status_message,
     )?;
     let mut last_refresh = Instant::now();
 

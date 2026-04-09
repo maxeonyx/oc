@@ -12,5 +12,12 @@ use anyhow::Result;
 use crate::service::SessionService;
 
 pub fn run_dashboard(service: &SessionService) -> Result<()> {
-    state::run(service)
+    run_dashboard_with_status(service, None)
+}
+
+pub fn run_dashboard_with_status(
+    service: &SessionService,
+    status_message: Option<String>,
+) -> Result<()> {
+    state::run(service, status_message)
 }

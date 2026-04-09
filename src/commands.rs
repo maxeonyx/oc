@@ -7,11 +7,71 @@ use crate::tmux;
 use crate::tui;
 
 pub fn run(service: &SessionService, action: RequestedAction) -> Result<()> {
-    if matches!(action, RequestedAction::Default) && service.auto_attach_directory_match()? {
-        return Ok(());
+    if matches!(action, RequestedAction::Default) {
+        match auto_attach_result(service)? {
+            AutoAttachResult::Attached => return Ok(()),
+            AutoAttachResult::FallbackToDashboard(status_message) => {
+                return tui::run_dashboard_with_status(service, status_message);
+            }
+            AutoAttachResult::NoMatch => {}
+        }
     }
 
-    run_requested_action(service, action)
+    let fallback_action = action.clone();
+    match run_requested_action(service, action) {
+        Ok(()) => Ok(()),
+        Err(error) => match interactive_attach_failure_status(&fallback_action, &error) {
+            Some(status_message) => tui::run_dashboard_with_status(service, Some(status_message)),
+            None => Err(error),
+        },
+    }
+}
+
+enum AutoAttachResult {
+    Attached,
+    FallbackToDashboard(Option<String>),
+    NoMatch,
+}
+
+fn auto_attach_result(service: &SessionService) -> Result<AutoAttachResult> {
+    let matches = service.current_directory_matches()?;
+    let [saved_session] = matches.as_slice() else {
+        return Ok(AutoAttachResult::NoMatch);
+    };
+
+    match service.activate_session(saved_session) {
+        Ok(()) => Ok(AutoAttachResult::Attached),
+        Err(error) if is_attach_failure(&error) => Ok(AutoAttachResult::FallbackToDashboard(Some(
+            format!("Auto-attach failed for {}: {error:#}", saved_session.name),
+        ))),
+        Err(error) => Err(error),
+    }
+}
+
+pub fn interactive_attach_failure_status(
+    action: &RequestedAction,
+    error: &anyhow::Error,
+) -> Option<String> {
+    if !is_attach_failure(error) {
+        return None;
+    }
+
+    match action {
+        RequestedAction::AttachTarget { target } => {
+            Some(format!("Attach failed for {target}: {error:#}"))
+        }
+        RequestedAction::New { name, .. } => Some(format!("Attach failed for {name}: {error:#}")),
+        RequestedAction::Move { target, .. } => {
+            Some(format!("Attach failed for {target}: {error:#}"))
+        }
+        _ => None,
+    }
+}
+
+fn is_attach_failure(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().contains("failed to attach"))
 }
 
 pub fn run_requested_action(service: &SessionService, action: RequestedAction) -> Result<()> {
