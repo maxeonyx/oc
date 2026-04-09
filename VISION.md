@@ -112,9 +112,15 @@ No single-letter hotkeys. They conflict with type-to-filter.
 
 ### Action bar
 
-All available actions (attach, stop, rm, restart) are shown as **separate items** in the action bar. Left/right moves a **highlight** across them to select which action Enter will execute. Unavailable actions (e.g. restart without a session ID, or stop on a saved session) are shown **grayed out**, not hidden — so the layout is stable and the user always knows what exists. Left/right skips unavailable actions.
+All available actions are shown as **separate items** in the action bar, ordered by frequency of use: **Attach, RM, Stop, Restart**. Left/right moves a **highlight** across them to select which action Enter will execute. Unavailable actions are shown **grayed out**, not hidden — so the layout is stable and the user always knows what exists. Left/right skips unavailable actions. The highlight itself communicates which action is active — no separate "Enter" label (the key help line already says `Enter run`). Action buttons should have clean padding/spacing.
 
-The selected action persists when you move between rows (does not reset to default on row change). This makes repeated actions on multiple sessions fast. If the persistent action becomes unavailable on the new row, the highlight auto-advances to the next available action.
+**Action availability by session status:**
+- **Attached:** Attach (reattach/focus), RM (remove alias + kill), Stop (graceful shutdown, keep alias), Restart (only with saved OpenCode session ID)
+- **Detached:** Attach (attach to running), RM (remove alias + kill), Stop (graceful shutdown, keep alias), Restart (only with saved OpenCode session ID)
+- **Saved:** Attach (launch + attach), RM (delete alias), Stop (unavailable — nothing running), Restart (unavailable)
+- **No selection (empty filter results):** All actions grayed out, no active highlight
+
+The selected action persists when you move between rows (does not reset to default on row change). This makes repeated actions on multiple sessions fast — especially cleanup flows (select RM, then arrow-Enter-arrow-Enter through sessions). If the persistent action becomes unavailable on the new row, the highlight auto-advances to the next available action.
 
 The input bar shows the current mode: `filter>` or `command>`. This is the primary indicator of which mode the user is in.
 
@@ -180,26 +186,31 @@ Default selection when the dashboard opens: the first session matching the curre
 
 ### Visual design
 
-The TUI should look like a modern terminal app — take inspiration from OpenCode's own UI.
+The TUI should feel like it belongs alongside OpenCode in the same terminal — native to the user's environment, not imposing its own aesthetic. OpenCode's own TUI is the visual reference.
 
-**Layout:** The dashboard is **centered in the terminal** and **sized to its content** — it should not fill the entire window. It expands as needed (more sessions → taller), but there's no empty space within the dashboard area. This means totals are always visible right below the last session row, not floating in a distant footer. When the session list exceeds the terminal height, the list scrolls and totals remain sticky at the bottom of the session area.
+**Theme awareness:** The tool must look correct in both light and dark terminal themes. This is the highest-priority visual requirement — a tool that looks wrong in the user's theme is broken. Detect the terminal background color if possible (e.g. `xterm` OSC 11 query), or use the terminal's own ANSI palette colors so the theme mapping happens naturally. Don't hardcode RGB values for backgrounds or panel colors. The user's terminal (light pink background, SSH through VirtualBox from Windows Terminal) must work correctly.
+
+**Color meaning:** Every color should communicate something — status, interactivity, selection state, information hierarchy. Color is not decoration. If a color doesn't carry meaning, it shouldn't be there.
+
+**Layout:** The dashboard is **centered in the terminal** and **sized to its content** — it should not fill the entire window. It expands as needed (more sessions → taller), but there's no empty space within the dashboard area. Totals are always visible right below the last session row. When the session list exceeds the terminal height, the list scrolls and totals remain sticky at the bottom of the session area.
+
+**Layout stability during filtering:** When the user starts typing a filter (transition from empty to non-empty filter text), the horizontal layout dimensions — column widths, total content width — lock to the current unfiltered data. Filter edits never cause horizontal resizing; the user's spatial memory is preserved. Vertical dimensions (row count, panel height) stay live and follow the filtered results — fewer matches make the panel shorter, which is expected. Background data changes while filtering can *expand* the locked horizontal dimensions (if a newly visible row needs more width) but never *shrink* them — shrinking is deferred until the filter is cleared. Clearing the filter (Esc, Ctrl-C, backspace to empty) discards the lock and recomputes fresh from current full data. Terminal resize always adapts regardless of filter state.
 
 **Layout order (top to bottom):**
 1. Input/filter bar
 2. Summary header (counts of attached/detached/saved — reacting to current filter when filtering, showing totals when in command mode or unfiltered)
-3. Session list with column headers
-4. Totals row (well-separated from sessions)
-5. Action bar
-6. Key help line
+3. Session list with column headers + totals row (totals are conceptually part of the sessions panel — separated by a blank line, not a panel border)
+4. Action bar
+5. Key help line
 
-**Borders and styling:** Panels are separated by **background color** — the terminal background is one color, and foreground panels are a different color. No line-drawing border characters (─│┌┐). To get clean vertical padding in a single terminal row, use **half-block characters** (▀▄) with the foreground/background colors set to the outer and inner panel colors respectively. This gives square padding edges on most terminals. See OpenCode's own TUI (visible in the `oc-oc-tui` tmux session) for the exact pattern.
+**Borders and styling:** Panels are separated by **background color** — the terminal background is one color, and foreground panels are a different color. No line-drawing border characters (─│┌┐). Half-block characters (▀▄) create clean transitions between panel and terminal background on **both the top and bottom edges** of each panel. See OpenCode's own TUI for the exact pattern.
 
-Use **colors** throughout — the tool needs visual richness, not just bold/dim/reverse. Must work in both light and dark terminal themes.
+**Padding:** Tight and purposeful. The filter bar and action bar should have minimal vertical padding — just enough to read clearly, not enough to feel spacious. The tool should feel compact.
 
 **Information hierarchy:** Important information should be prominent; less important information should be subdued. Specifically:
 - Column headers should be clearly styled
 - Group headers (when filtering) should be **full-width** and **grayed out** — present but innocuous
-- Totals row should be visually distinct from sessions, well-separated
+- Totals row should be visually distinct from sessions but within the same panel
 - The input bar should have a visible cursor
 
 **Other:**
@@ -244,11 +255,11 @@ Migration is an explicit user action (`oc migrate`), idempotent — safe to run 
 
 ## Learnings from prototyping
 
-Two throwaway Rust prototypes were built (one by GPT-5.4, one by Claude Opus), plus a v0.2.0 implementation that was feature-complete but visually wrong. Key findings:
+Two throwaway Rust prototypes were built (one by GPT-5.4, one by Claude Opus), plus a v0.2.0 implementation that was feature-complete but visually wrong, and a v0.3.x that got the structure right but hardcoded dark-mode colors. Key findings:
 
 - **The TUI is the point.** A print-and-prompt Rust rewrite adds nothing over the fish version. The interactive dashboard with arrow navigation is the core value of the rewrite.
 - **Summary header matters.** Session-count summary (attached/detached/saved) gives immediate context.
-- **Light mode must work.** One prototype assumed dark terminal colors and was unreadable in light mode. Use colors that work in both.
+- **Light mode must actually work.** Multiple iterations assumed dark terminal colors and were unreadable or ugly in light mode. The user's primary terminal is light mode. Don't hardcode colors — use the terminal's palette or detect the background.
 - **Left/right action cycling with wrapping feels right.** Actions should be separate items with a moving highlight; unavailable actions grayed out, not hidden.
 - **Type-to-filter is great but kills hotkeys.** Can't have both 'n' for new and typing 'n' to filter. Solution: drop hotkeys entirely.
 - **"New session" row was wrong.** Creating sessions from the TUI is rare — a new session almost always needs a directory. Keep it as a command for the rare case.
@@ -257,3 +268,8 @@ Two throwaway Rust prototypes were built (one by GPT-5.4, one by Claude Opus), p
 - **Input bar belongs at the top.** Matches the common mental model (type then see results below).
 - **`ratatui` + `crossterm` works well.** Both prototypes used this stack. `Paragraph` with `Line` spans gives better per-row control than ratatui's `Table` widget.
 - **All three session states must be visible.** Both prototypes initially missed showing saved-but-not-running aliases. The merged list (tmux sessions + saved aliases) is essential.
+- **Layout must not jump during filtering.** The v0.3.x content-sizing was technically correct (wider content = wider panel) but caused the UI to resize as the filter narrowed results, which felt broken.
+- **Half-block borders need both edges.** v0.3.x only did top edges of panels, not bottom edges.
+- **Padding must be tight.** v0.3.x filter bar and action bar had excessive vertical padding.
+- **Action ordering by frequency.** Attach is most common, then RM, then Stop, then Restart. Restart is the rarest and needs a saved OpenCode session ID to be available.
+- **Totals row belongs inside the sessions panel.** Not a separate panel with its own borders — a blank-line-separated row within the session table area.
