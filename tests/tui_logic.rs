@@ -1,8 +1,9 @@
+use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
-use oc::tui::command::{CommandParseError, ParsedCommand, parse_command};
-use oc::tui::filter::{build_display_rows, totals_for_rows};
+use oc::tui::command::{parse_command, CommandParseError};
+use oc::tui::filter::{build_view, totals_for_rows};
 use oc::tui::selection::{preferred_action_for_row, select_index};
-use oc::tui::types::{DashboardAction, DashboardSnapshot, DisplayRow, InputMode};
+use oc::tui::types::{DashboardAction, DashboardRow, DashboardSnapshot, DashboardView, InputMode};
 
 use std::path::PathBuf;
 
@@ -35,10 +36,10 @@ fn filter_groups_by_priority_then_match_strength() {
         session_entry(43, "fix-1", "/tmp/fix-1", None, SessionStatus::Saved),
     ]);
 
-    let rows = build_display_rows(&snapshot, "1", InputMode::Filter, None);
+    let view = build_view(&snapshot, "1", InputMode::Filter, None);
 
-    assert_display_rows(
-        &rows,
+    assert_view(
+        &view,
         &[
             "header",
             "group:numeric id",
@@ -57,18 +58,18 @@ fn filter_groups_by_priority_then_match_strength() {
 #[test]
 fn filter_uses_highest_priority_match_only_once() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![session_entry(
-        12,
-        "12-dc",
-        "/tmp/12-dc",
+        312,
+        "12",
+        "/tmp/12",
         Some("ses_12abc"),
         SessionStatus::Saved,
     )]);
 
-    let rows = build_display_rows(&snapshot, "12", InputMode::Filter, None);
+    let view = build_view(&snapshot, "12", InputMode::Filter, None);
 
-    assert_display_rows(
-        &rows,
-        &["header", "group:numeric id", "session:12", "totals:1:0"],
+    assert_view(
+        &view,
+        &["header", "group:numeric id", "session:312", "totals:1:0"],
     );
 }
 
@@ -79,12 +80,9 @@ fn empty_filter_shows_new_row_then_sessions_when_no_directory_match() {
         session_entry(2, "beta", "/tmp/beta", None, SessionStatus::Saved),
     ]);
 
-    let rows = build_display_rows(&snapshot, "", InputMode::Filter, None);
+    let view = build_view(&snapshot, "", InputMode::Filter, None);
 
-    assert_display_rows(
-        &rows,
-        &["header", "new", "session:1", "session:2", "totals:2:0"],
-    );
+    assert_view(&view, &["header", "session:1", "session:2", "totals:2:0"]);
 }
 
 #[test]
@@ -101,19 +99,18 @@ fn empty_filter_places_new_row_after_directory_matches() {
         ),
     ]);
 
-    let rows = build_display_rows(
+    let view = build_view(
         &snapshot,
         "",
         InputMode::Filter,
         Some(PathBuf::from("/work/alpha")),
     );
 
-    assert_display_rows(
-        &rows,
+    assert_view(
+        &view,
         &[
             "header",
             "session:1",
-            "new",
             "session:2",
             "session:3",
             "totals:3:0",
@@ -134,11 +131,8 @@ fn available_actions_depend_on_row_status() {
         session_entry(2, "saved", "/tmp/saved", None, SessionStatus::Saved),
     ]);
 
-    let rows = build_display_rows(&snapshot, "", InputMode::Filter, None);
-    let sessions = rows
-        .iter()
-        .filter_map(DisplayRow::session)
-        .collect::<Vec<_>>();
+    let view = build_view(&snapshot, "", InputMode::Filter, None);
+    let sessions = view.sessions().collect::<Vec<_>>();
     let running = sessions[0];
     let saved = sessions[1];
 
@@ -161,31 +155,33 @@ fn available_actions_depend_on_row_status() {
 fn command_parser_supports_dashboard_commands() {
     assert_eq!(
         parse_command("new dc").unwrap(),
-        ParsedCommand::New {
-            name: String::from("dc")
+        RequestedAction::New {
+            name: String::from("dc"),
+            dir: None,
+            opencode_args: Vec::new()
         }
     );
     assert_eq!(
         parse_command("rm 1").unwrap(),
-        ParsedCommand::Remove {
+        RequestedAction::Rm {
             target: String::from("1")
         }
     );
     assert_eq!(
         parse_command("stop dc").unwrap(),
-        ParsedCommand::Stop {
+        RequestedAction::Stop {
             target: String::from("dc")
         }
     );
     assert_eq!(
         parse_command("restart dc").unwrap(),
-        ParsedCommand::Restart {
+        RequestedAction::Restart {
             target: String::from("dc")
         }
     );
     assert_eq!(
         parse_command("mv dc /tmp/project").unwrap(),
-        ParsedCommand::Move {
+        RequestedAction::Move {
             target: String::from("dc"),
             new_dir: PathBuf::from("/tmp/project"),
         }
@@ -221,8 +217,8 @@ fn totals_only_count_session_rows() {
         ),
     ]);
 
-    let rows = build_display_rows(&snapshot, "", InputMode::Filter, None);
-    let totals = totals_for_rows(&snapshot.summary, &rows);
+    let view = build_view(&snapshot, "", InputMode::Filter, None);
+    let totals = totals_for_rows(&snapshot.summary, view.sessions());
 
     assert_eq!(totals.filtered_sessions, 2);
     assert_eq!(totals.filtered_running, 1);
@@ -234,9 +230,9 @@ fn default_selection_prefers_new_session_without_directory_match() {
         session_entry(1, "alpha", "/tmp/alpha", None, SessionStatus::Saved),
         session_entry(2, "beta", "/tmp/beta", None, SessionStatus::Saved),
     ]);
-    let rows = build_display_rows(&snapshot, "", InputMode::Filter, None);
+    let view = build_view(&snapshot, "", InputMode::Filter, None);
 
-    assert_eq!(select_index(&rows, None, None), 1);
+    assert_eq!(select_index(&view, None, None), 0);
 }
 
 #[test]
@@ -245,7 +241,7 @@ fn default_selection_prefers_directory_match_before_new_session() {
         session_entry(1, "alpha", "/work/project", None, SessionStatus::Saved),
         session_entry(2, "beta", "/tmp/beta", None, SessionStatus::Saved),
     ]);
-    let rows = build_display_rows(
+    let view = build_view(
         &snapshot,
         "",
         InputMode::Filter,
@@ -253,8 +249,8 @@ fn default_selection_prefers_directory_match_before_new_session() {
     );
 
     assert_eq!(
-        select_index(&rows, None, Some(PathBuf::from("/work/project").as_path())),
-        1
+        select_index(&view, None, Some(PathBuf::from("/work/project").as_path())),
+        0
     );
 }
 
@@ -270,15 +266,15 @@ fn preferred_action_falls_back_when_row_cannot_support_requested_action() {
             SessionStatus::RunningDetached,
         ),
     ]);
-    let rows = build_display_rows(&snapshot, "", InputMode::Filter, None);
+    let view = build_view(&snapshot, "", InputMode::Filter, None);
 
-    let saved_row = rows
-        .iter()
-        .find(|row| matches!(row, DisplayRow::Session(session) if session.session_id == 1))
+    let saved_row = view
+        .sessions()
+        .find(|session| session.session_id == 1)
         .expect("saved row should exist");
-    let running_row = rows
-        .iter()
-        .find(|row| matches!(row, DisplayRow::Session(session) if session.session_id == 2))
+    let running_row = view
+        .sessions()
+        .find(|session| session.session_id == 2)
         .expect("running row should exist");
 
     assert_eq!(
@@ -289,6 +285,24 @@ fn preferred_action_falls_back_when_row_cannot_support_requested_action() {
         preferred_action_for_row(running_row, DashboardAction::Restart),
         DashboardAction::Restart
     );
+}
+
+#[test]
+fn filter_enters_top_result_after_refreshing_from_previous_selection() {
+    let snapshot = DashboardSnapshot::from_session_entries(vec![
+        session_entry(1, "alpha", "/tmp/alpha", None, SessionStatus::Saved),
+        session_entry(12, "beta", "/tmp/beta", None, SessionStatus::Saved),
+        session_entry(2, "1-match", "/tmp/1-match", None, SessionStatus::Saved),
+    ]);
+
+    let unfiltered_view = build_view(&snapshot, "", InputMode::Filter, None);
+    let previous_selection = Some(oc::tui::selection::SelectedSession(2));
+
+    assert_eq!(select_index(&unfiltered_view, previous_selection, None), 1);
+
+    let filtered_view = build_view(&snapshot, "1", InputMode::Filter, None);
+
+    assert_eq!(select_index(&filtered_view, None, None), 0);
 }
 
 fn session_entry(
@@ -311,20 +325,25 @@ fn session_entry(
     }
 }
 
-fn assert_display_rows(rows: &[DisplayRow], expected: &[&str]) {
-    let actual = rows
-        .iter()
-        .map(|row| match row {
-            DisplayRow::ColumnHeader => String::from("header"),
-            DisplayRow::GroupHeader { title } => format!("group:{title}"),
-            DisplayRow::NewSession => String::from("new"),
-            DisplayRow::Session(row) => format!("session:{}", row.session_id),
-            DisplayRow::Totals(summary) => format!(
-                "totals:{}:{}",
-                summary.filtered_sessions, summary.filtered_running
-            ),
-        })
-        .collect::<Vec<_>>();
+fn assert_view(view: &DashboardView, expected: &[&str]) {
+    let mut actual = vec![String::from("header")];
+
+    for group in &view.groups {
+        if let Some(title) = &group.title {
+            actual.push(format!("group:{title}"));
+        }
+
+        actual.extend(group.sessions.iter().map(render_session_row));
+    }
+
+    actual.push(format!(
+        "totals:{}:{}",
+        view.totals.filtered_sessions, view.totals.filtered_running
+    ));
 
     assert_eq!(actual, expected);
+}
+
+fn render_session_row(row: &DashboardRow) -> String {
+    format!("session:{}", row.session_id)
 }
