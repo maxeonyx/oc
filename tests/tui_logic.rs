@@ -142,8 +142,8 @@ fn available_actions_depend_on_row_status() {
         running.available_actions(),
         vec![
             DashboardAction::Attach,
-            DashboardAction::Stop,
             DashboardAction::Remove,
+            DashboardAction::Stop,
             DashboardAction::Restart
         ]
     );
@@ -415,7 +415,7 @@ fn persistent_action_auto_advances_and_cycles_skip_unavailable_actions() {
 
     assert_eq!(
         preferred_action_for_row(saved_row, DashboardAction::Stop),
-        DashboardAction::Remove
+        DashboardAction::Attach
     );
     assert_eq!(
         preferred_action_for_row(saved_row, DashboardAction::Restart),

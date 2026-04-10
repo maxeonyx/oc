@@ -123,22 +123,10 @@ impl DashboardRow {
     }
 
     pub fn available_actions(&self) -> Vec<DashboardAction> {
-        match self.status {
-            SessionStatus::RunningAttached | SessionStatus::RunningDetached => {
-                let mut actions = vec![
-                    DashboardAction::Attach,
-                    DashboardAction::Stop,
-                    DashboardAction::Remove,
-                ];
-
-                if self.opencode_session_id.is_some() {
-                    actions.push(DashboardAction::Restart);
-                }
-
-                actions
-            }
-            SessionStatus::Saved => vec![DashboardAction::Attach, DashboardAction::Remove],
-        }
+        DashboardAction::DISPLAY_ORDER
+            .into_iter()
+            .filter(|action| self.supports_action(*action))
+            .collect()
     }
 
     pub fn memory_label(&self) -> String {
@@ -154,10 +142,28 @@ impl DashboardRow {
             SessionStatus::RunningAttached | SessionStatus::RunningDetached
         )
     }
+
+    fn supports_action(&self, action: DashboardAction) -> bool {
+        match action {
+            DashboardAction::Attach => true,
+            DashboardAction::Remove => true,
+            DashboardAction::Stop => self.is_running(),
+            DashboardAction::Restart => self.is_running() && self.opencode_session_id.is_some(),
+        }
+    }
 }
 
 impl DashboardAction {
-    pub const ALL: [Self; 4] = [Self::Attach, Self::Stop, Self::Remove, Self::Restart];
+    pub const DISPLAY_ORDER: [Self; 4] = [Self::Attach, Self::Remove, Self::Stop, Self::Restart];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Attach => "ATTACH",
+            Self::Stop => "STOP",
+            Self::Remove => "RM",
+            Self::Restart => "RESTART",
+        }
+    }
 }
 
 impl DashboardView {

@@ -1,5 +1,6 @@
 use crate::session::SavedSession;
 use std::path::Path;
+use unicode_width::UnicodeWidthStr;
 
 pub fn format_memory(bytes: u64) -> String {
     if bytes == 0 {
@@ -37,18 +38,27 @@ pub fn format_column_row(
     directory: &str,
     widths: &ColumnWidths,
 ) -> String {
-    format!(
-        "{:<id_width$}  {:<name_width$}  {:<status_width$}  {:<memory_width$}  {}",
-        id,
-        name,
-        status,
-        memory,
-        directory,
-        id_width = widths.id,
-        name_width = widths.name,
-        status_width = widths.status,
-        memory_width = widths.memory,
-    )
+    [
+        pad_to_display_width(id, widths.id),
+        String::from("  "),
+        pad_to_display_width(name, widths.name),
+        String::from("  "),
+        pad_to_display_width(status, widths.status),
+        String::from("  "),
+        pad_to_display_width(memory, widths.memory),
+        String::from("  "),
+        String::from(directory),
+    ]
+    .concat()
+}
+
+pub fn display_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
+pub fn pad_to_display_width(text: &str, target_width: usize) -> String {
+    let padding_width = target_width.saturating_sub(display_width(text));
+    format!("{text}{}", " ".repeat(padding_width))
 }
 
 #[derive(Debug, Clone, Copy)]

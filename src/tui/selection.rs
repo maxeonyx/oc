@@ -47,7 +47,7 @@ pub fn preferred_action_for_row(row: &DashboardRow, current: DashboardAction) ->
         return current;
     }
 
-    let ordered_actions = DashboardAction::ALL;
+    let ordered_actions = DashboardAction::DISPLAY_ORDER;
     let current_index = ordered_actions
         .iter()
         .position(|action| *action == current)
@@ -101,13 +101,4 @@ fn default_selected_identity(
     view.sessions()
         .next()
         .map(|session| SelectedSession(session.session_id))
-}
-
-pub fn action_label(action: DashboardAction) -> &'static str {
-    match action {
-        DashboardAction::Attach => "ATTACH",
-        DashboardAction::Stop => "STOP",
-        DashboardAction::Remove => "RM",
-        DashboardAction::Restart => "RESTART",
-    }
 }
