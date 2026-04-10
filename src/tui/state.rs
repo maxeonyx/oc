@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -14,13 +14,14 @@ use std::time::{Duration, Instant};
 use crate::commands;
 use crate::service::SessionService;
 
-use super::command::{parse_command, CommandParseError};
+use super::command::{CommandParseError, parse_command};
 use super::filter::{build_view, summary_for_view, totals_scope_label};
-use super::input::{map_key_event, InputIntent};
+use super::input::{InputIntent, map_key_event};
 use super::render;
+use super::render::{HorizontalMetrics, Theme};
 use super::selection::{
-    available_actions, cycle_action_for_row, preferred_action_for_row, select_index_for_input,
-    SelectedSession,
+    SelectedSession, available_actions, cycle_action_for_row, preferred_action_for_row,
+    select_index_for_input,
 };
 use super::types::{
     DashboardAction, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,
@@ -37,7 +38,9 @@ pub struct DashboardState {
     pub input_text: String,
     pub status_message: Option<String>,
     pub current_directory: Option<PathBuf>,
+    pub theme: Theme,
     pending_restart: Option<PendingRestart>,
+    horizontal_metrics_lock: Option<HorizontalMetrics>,
 }
 
 struct PendingRestart {
@@ -47,6 +50,7 @@ struct PendingRestart {
 
 pub fn run(service: &SessionService, status_message: Option<String>) -> Result<()> {
     let mut terminal = TerminalGuard::enter()?;
+    let theme = render::detect_theme();
     let mut state = DashboardState::load(
         service,
         None,
@@ -54,6 +58,8 @@ pub fn run(service: &SessionService, status_message: Option<String>) -> Result<(
         InputMode::Filter,
         String::new(),
         status_message,
+        theme,
+        None,
     )?;
     let mut last_refresh = Instant::now();
 
@@ -99,6 +105,9 @@ fn handle_input(
         InputIntent::Backspace => state.handle_backspace(service)?,
         InputIntent::EnterCommandMode => state.enter_command_mode(),
         InputIntent::InsertChar(character) => {
+            if state.input_mode == InputMode::Filter && state.input_text.is_empty() {
+                state.begin_filter_lock();
+            }
             state.input_text.push(character);
             state.status_message = None;
             if state.input_mode == InputMode::Filter {
@@ -119,6 +128,8 @@ impl DashboardState {
         input_mode: InputMode,
         input_text: String,
         status_message: Option<String>,
+        theme: Theme,
+        horizontal_metrics_lock: Option<HorizontalMetrics>,
     ) -> Result<Self> {
         let current_directory = std::env::current_dir().ok();
         let snapshot = DashboardSnapshot::from_session_entries(service.list_dashboard_sessions()?);
@@ -145,10 +156,13 @@ impl DashboardState {
             input_text,
             status_message,
             current_directory,
+            theme,
             pending_restart: None,
+            horizontal_metrics_lock,
         };
 
         state.reconcile_selected_action();
+        state.update_filter_lock();
         Ok(state)
     }
 
@@ -163,6 +177,8 @@ impl DashboardState {
             self.input_mode,
             self.input_text.clone(),
             self.status_message.clone(),
+            self.theme,
+            self.horizontal_metrics_lock,
         )?;
         self.pending_restart = pending_restart;
         Ok(())
@@ -199,6 +215,7 @@ impl DashboardState {
 
     pub fn enter_command_mode(&mut self) {
         self.input_mode = InputMode::Command;
+        self.clear_filter_lock();
         if !self.input_text.ends_with(' ') {
             self.input_text.push(' ');
         }
@@ -211,8 +228,14 @@ impl DashboardState {
 
         if self.input_mode == InputMode::Command && !self.input_text.contains(' ') {
             self.input_mode = InputMode::Filter;
+            if !self.input_text.is_empty() {
+                self.begin_filter_lock();
+            }
             self.refresh(service)?;
         } else if self.input_mode == InputMode::Filter {
+            if self.input_text.is_empty() {
+                self.clear_filter_lock();
+            }
             self.refresh(service)?;
         }
 
@@ -250,10 +273,41 @@ impl DashboardState {
         totals_scope_label(self.input_mode, &self.input_text)
     }
 
+    pub fn effective_horizontal_metrics(&self) -> HorizontalMetrics {
+        self.horizontal_metrics_lock
+            .unwrap_or_else(|| render::horizontal_metrics(self))
+    }
+
     fn reconcile_selected_action(&mut self) {
         if let Some(row) = self.selected_row() {
             self.selected_action = preferred_action_for_row(row, self.selected_action);
         }
+    }
+
+    fn begin_filter_lock(&mut self) {
+        self.horizontal_metrics_lock = Some(render::horizontal_metrics(self));
+    }
+
+    fn clear_filter_lock(&mut self) {
+        self.horizontal_metrics_lock = None;
+    }
+
+    fn update_filter_lock(&mut self) {
+        if !self.has_active_filter() {
+            self.clear_filter_lock();
+            return;
+        }
+
+        let expansion = render::expansion_candidate_metrics(self);
+        self.horizontal_metrics_lock = Some(
+            self.horizontal_metrics_lock
+                .unwrap_or(expansion)
+                .expanded_with(expansion),
+        );
+    }
+
+    fn has_active_filter(&self) -> bool {
+        self.input_mode == InputMode::Filter && !self.input_text.is_empty()
     }
 
     fn execute_command(&mut self, service: &SessionService) -> Result<()> {
@@ -267,6 +321,8 @@ impl DashboardState {
                     self.selected_action,
                     InputMode::Filter,
                     String::new(),
+                    None,
+                    self.theme,
                     None,
                 )?;
             }
@@ -295,6 +351,7 @@ impl DashboardState {
         self.input_text.clear();
         self.input_mode = InputMode::Filter;
         self.status_message = None;
+        self.clear_filter_lock();
         self.refresh(service)
     }
 
@@ -306,6 +363,7 @@ impl DashboardState {
         self.input_text.clear();
         self.input_mode = InputMode::Filter;
         self.status_message = None;
+        self.clear_filter_lock();
         self.refresh(service)?;
         Ok(false)
     }

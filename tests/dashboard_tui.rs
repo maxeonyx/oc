@@ -27,7 +27,7 @@ fn create_saved_alias(env: &TestEnv, name: &str, directory: &std::path::Path) {
 
 fn launch_dashboard(env: &TestEnv, parent_session_name: &str) -> String {
     let command = format!(
-        "OC_ALIASES_FILE=\"{}\" OC_TMUX_PREFIX=\"{}\" OC_OPENCODE_DB=\"{}\" {}",
+        "OC_THEME=dark OC_ALIASES_FILE=\"{}\" OC_TMUX_PREFIX=\"{}\" OC_OPENCODE_DB=\"{}\" {}",
         env.aliases_file().display(),
         env.tmux_prefix(),
         env.opencode_db().display(),

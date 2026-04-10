@@ -59,6 +59,7 @@ write_env_file() {
   cat >"$fixture_dir/fixture.env" <<EOF
 export OC_ALIASES_FILE='$db_path'
 export OC_TMUX_PREFIX='$tmux_prefix'
+export OC_OPENCODE_DB='$fixture_dir/opencode.sqlite'
 export OC_TEST_FIXTURE_DIR='$fixture_dir'
 EOF
 }
@@ -67,9 +68,10 @@ register_aliases() {
   local oc_bin=$1
   local db_path=$2
   local tmux_prefix=$3
+  local fixture_root=$4
 
-  local -n registered_names_ref=$4
-  local -n registered_dirs_ref=$5
+  local -n registered_names_ref=$5
+  local -n registered_dirs_ref=$6
 
   local -a candidates=(
     "oc|$REPO_ROOT"
@@ -79,6 +81,10 @@ register_aliases() {
     "home-lab|$HOME"
     "dc-main|$HOME/dc-main"
     "tmp-long-project|/var/tmp"
+    "alpha-01|$fixture_root/projects/alpha-01"
+    "alpha-ops|$fixture_root/projects/alpha-ops"
+    "job-117|$fixture_root/projects/job-117"
+    "ses-demo|$fixture_root/projects/ses-demo"
   )
 
   local entry name dir
@@ -97,6 +103,28 @@ register_aliases() {
     printf 'Expected at least 4 usable fixture directories, found %s\n' "${#registered_names_ref[@]}" >&2
     exit 1
   fi
+}
+
+set_saved_session_id() {
+  local db_path=$1
+  local name=$2
+  local session_id=$3
+
+  python3 - "$db_path" "$name" "$session_id" <<'PY'
+import sqlite3
+import sys
+
+db_path, name, session_id = sys.argv[1:4]
+connection = sqlite3.connect(db_path)
+updated = connection.execute(
+    "UPDATE sessions SET opencode_session_id = ? WHERE name = ?",
+    (session_id, name),
+).rowcount
+connection.commit()
+connection.close()
+if updated != 1:
+    raise SystemExit(f"expected exactly one row updated for {name}, got {updated}")
+PY
 }
 
 start_detached_session() {
@@ -201,6 +229,8 @@ create_fixture() {
   fi
 
   local db_path="$fixture_dir/oc.db"
+  local fixture_root="$fixture_dir"
+  mkdir -p "$fixture_root/projects/alpha-01" "$fixture_root/projects/alpha-ops" "$fixture_root/projects/job-117" "$fixture_root/projects/ses-demo"
   local tmux_token
   tmux_token=$(sanitize_tmux_token "$(basename "$fixture_dir")")
   local tmux_prefix="oc-fixture-$tmux_token-"
@@ -214,7 +244,8 @@ create_fixture() {
 
   local -a alias_names=()
   local -a alias_dirs=()
-  register_aliases "$oc_bin" "$db_path" "$tmux_prefix" alias_names alias_dirs
+  register_aliases "$oc_bin" "$db_path" "$tmux_prefix" "$fixture_root" alias_names alias_dirs
+  set_saved_session_id "$db_path" "ses-demo" "ses_fixture_demo_123"
 
   local attached_name=${alias_names[0]}
   local attached_dir=${alias_dirs[0]}

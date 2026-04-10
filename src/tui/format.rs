@@ -27,7 +27,11 @@ pub fn abbreviate_directory(saved_session: &SavedSession) -> String {
         .filter(|parent| !parent.is_empty())
         .unwrap_or_else(|| String::from("."));
 
-    format!("{prefix}/…")
+    if prefix == "/" {
+        String::from("/…")
+    } else {
+        format!("{prefix}/…")
+    }
 }
 
 pub fn format_column_row(
@@ -61,7 +65,7 @@ pub fn pad_to_display_width(text: &str, target_width: usize) -> String {
     format!("{text}{}", " ".repeat(padding_width))
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColumnWidths {
     pub id: usize,
     pub name: usize,

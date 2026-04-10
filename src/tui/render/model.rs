@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::session::SessionStatus;
@@ -13,11 +13,34 @@ use crate::tui::types::{
     ActionState, CursorPosition, DashboardAction, DashboardGroup, DashboardRow, InputMode,
 };
 
+const MIN_CONTENT_WIDTH: u16 = 40;
+const SESSION_FOOTER_LINES: usize = 2;
+const SESSION_HEADER_LINES: usize = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HorizontalMetrics {
+    pub column_widths: ColumnWidths,
+    pub content_width: u16,
+}
+
+impl HorizontalMetrics {
+    pub fn expanded_with(self, other: Self) -> Self {
+        Self {
+            column_widths: ColumnWidths {
+                id: self.column_widths.id.max(other.column_widths.id),
+                name: self.column_widths.name.max(other.column_widths.name),
+                status: self.column_widths.status.max(other.column_widths.status),
+                memory: self.column_widths.memory.max(other.column_widths.memory),
+            },
+            content_width: self.content_width.max(other.content_width),
+        }
+    }
+}
+
 pub struct RenderModel {
     pub summary_line: Line<'static>,
     pub input_lines: Vec<Line<'static>>,
     pub session_table: SessionTable,
-    pub totals_line: Line<'static>,
     pub action_lines: Vec<Line<'static>>,
     pub help_line: Line<'static>,
     content_width: u16,
@@ -26,45 +49,39 @@ pub struct RenderModel {
 
 pub struct SessionTable {
     all_lines: Vec<Line<'static>>,
-    selected_line_index: usize,
+    body_scroll: usize,
+}
+
+pub fn horizontal_metrics(state: &DashboardState) -> HorizontalMetrics {
+    horizontal_metrics_with_input(state, true)
+}
+
+pub fn expansion_candidate_metrics(state: &DashboardState) -> HorizontalMetrics {
+    horizontal_metrics_with_input(state, false)
 }
 
 impl RenderModel {
-    pub fn from_state(state: &DashboardState, theme: &Theme) -> Self {
-        let column_widths = column_widths(state);
-        let session_table = SessionTable::from_state(state, &column_widths, theme);
-        let summary_line = summary_line(state, theme);
-        let input_lines = input_lines(state, theme);
-        let totals_line = totals_line(state, &column_widths, theme);
-        let action_lines = action_lines(state, theme);
-        let help_line = help_line(theme);
-        let input_cursor_offset = input_cursor_offset(state);
-        let content_width = [
-            line_width(&summary_line),
-            lines_width(&input_lines),
-            session_table.width(),
-            line_width(&totals_line),
-            lines_width(&action_lines),
-            line_width(&help_line),
-        ]
-        .into_iter()
-        .max()
-        .unwrap_or(40);
+    pub fn from_state(state: &DashboardState, metrics: HorizontalMetrics) -> Self {
+        let column_widths = metrics.column_widths;
+        let session_table = SessionTable::from_state(state, &column_widths, &state.theme);
 
         Self {
-            summary_line,
-            input_lines,
+            summary_line: summary_line(state, &state.theme),
+            input_lines: input_lines(state, &state.theme),
             session_table,
-            totals_line,
-            action_lines,
-            help_line,
-            content_width,
-            input_cursor_offset,
+            action_lines: action_lines(state, &state.theme),
+            help_line: help_line(&state.theme),
+            content_width: metrics.content_width,
+            input_cursor_offset: input_cursor_offset(state),
         }
     }
 
     pub fn content_width(&self) -> u16 {
         self.content_width
+    }
+
+    pub fn input_content_height(&self) -> u16 {
+        self.input_lines.len() as u16
     }
 
     pub fn cursor_position(&self, area: Rect) -> CursorPosition {
@@ -76,10 +93,15 @@ impl RenderModel {
 }
 
 impl SessionTable {
-    fn from_state(state: &DashboardState, column_widths: &ColumnWidths, theme: &Theme) -> Self {
+    fn from_state(state: &DashboardState, widths: &ColumnWidths, theme: &Theme) -> Self {
+        let all_lines = session_lines(state, widths, theme);
+        let footer_start = all_lines.len().saturating_sub(SESSION_FOOTER_LINES);
+        let body_line_count = footer_start.saturating_sub(1);
+        let selected_body_index = selected_body_line_index(state);
+
         Self {
-            all_lines: session_lines(state, column_widths, theme),
-            selected_line_index: selected_line_index(state),
+            body_scroll: selected_body_index.min(body_line_count.saturating_sub(1)),
+            all_lines,
         }
     }
 
@@ -87,28 +109,29 @@ impl SessionTable {
         self.all_lines.len()
     }
 
-    pub fn width(&self) -> u16 {
-        lines_width(&self.all_lines)
-    }
-
     pub fn visible_lines(&self, max_lines: usize) -> Vec<Line<'static>> {
         if self.all_lines.len() <= max_lines {
             return self.all_lines.clone();
         }
 
-        let scroll = self
-            .selected_line_index
-            .saturating_sub(max_lines.saturating_sub(2));
+        let footer_start = self.all_lines.len().saturating_sub(SESSION_FOOTER_LINES);
         let header = self.all_lines[0].clone();
-        let visible_body = self
-            .all_lines
+        let footer = self.all_lines[footer_start..].to_vec();
+        let body = &self.all_lines[1..footer_start];
+        let body_space = max_lines.saturating_sub(SESSION_HEADER_LINES + SESSION_FOOTER_LINES);
+        let max_scroll = body.len().saturating_sub(body_space);
+        let scroll = self.body_scroll.min(max_scroll);
+        let visible_body = body
             .iter()
-            .skip(scroll.max(1))
-            .take(max_lines.saturating_sub(1))
+            .skip(scroll)
+            .take(body_space)
             .cloned()
             .collect::<Vec<_>>();
 
-        std::iter::once(header).chain(visible_body).collect()
+        std::iter::once(header)
+            .chain(visible_body)
+            .chain(footer)
+            .collect()
     }
 }
 
@@ -138,40 +161,26 @@ fn input_lines(state: &DashboardState, theme: &Theme) -> Vec<Line<'static>> {
         InputMode::Command => "command",
     };
 
-    vec![
-        Line::from(vec![
-            Span::styled(format!("{mode}> "), Style::default().fg(theme.accent)),
-            Span::styled(
-                state.input_text.clone(),
-                Style::default().fg(theme.panel_text),
-            ),
-        ]),
-        Line::from(Span::styled(
-            state.status_message.clone().unwrap_or_default(),
-            Style::default().fg(theme.muted_text),
-        )),
-    ]
-}
-
-fn totals_line(state: &DashboardState, widths: &ColumnWidths, theme: &Theme) -> Line<'static> {
-    Line::from(Span::styled(
-        format_column_row(
-            &state.view.totals.filtered_sessions.to_string(),
-            "total sessions",
-            &state.view.totals.filtered_running.to_string(),
-            &format_memory(state.view.totals.filtered_memory_bytes),
-            state.totals_scope_label(),
-            widths,
+    let mut lines = vec![Line::from(vec![
+        Span::styled(format!("{mode}> "), Style::default().fg(theme.accent)),
+        Span::styled(
+            state.input_text.clone(),
+            Style::default().fg(theme.panel_text),
         ),
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    ))
+    ])];
+
+    if let Some(status) = &state.status_message {
+        lines.push(Line::from(Span::styled(
+            status.clone(),
+            Style::default().fg(theme.muted_text),
+        )));
+    }
+
+    lines
 }
 
 fn action_lines(state: &DashboardState, theme: &Theme) -> Vec<Line<'static>> {
     let action_states = action_states(state);
-    let selected_label = state.selected_action.label();
     let mut action_spans = Vec::new();
 
     for (index, action_state) in action_states.iter().enumerate() {
@@ -181,16 +190,7 @@ fn action_lines(state: &DashboardState, theme: &Theme) -> Vec<Line<'static>> {
         action_spans.push(action_label_span(action_state, theme));
     }
 
-    vec![
-        Line::from(action_spans),
-        Line::from(vec![
-            Span::styled("Enter ", Style::default().fg(theme.accent)),
-            Span::styled(
-                format!("runs {selected_label}"),
-                Style::default().fg(theme.muted_text),
-            ),
-        ]),
-    ]
+    vec![Line::from(action_spans)]
 }
 
 fn help_line(theme: &Theme) -> Line<'static> {
@@ -212,13 +212,16 @@ fn help_line(theme: &Theme) -> Line<'static> {
 
 fn action_states(state: &DashboardState) -> Vec<ActionState> {
     let available = state.available_actions();
+    let has_selection = state.selected_row().is_some();
 
     DashboardAction::DISPLAY_ORDER
         .into_iter()
         .map(|action| ActionState {
             action,
             enabled: available.contains(&action),
-            selected: state.selected_action == action,
+            selected: has_selection
+                && available.contains(&action)
+                && state.selected_action == action,
         })
         .collect()
 }
@@ -228,29 +231,113 @@ fn action_label_span(action_state: &ActionState, theme: &Theme) -> Span<'static>
         (true, true) => Span::styled(
             format!(" {} ", action_state.action.label()),
             Style::default()
-                .fg(Color::Black)
-                .bg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        (true, false) => Span::styled(
-            format!(" {} ", action_state.action.label()),
-            Style::default()
-                .fg(theme.muted_text)
-                .bg(Color::Gray)
+                .fg(theme.selection_text)
+                .bg(theme.selection_bg)
                 .add_modifier(Modifier::BOLD),
         ),
         (false, true) => Span::styled(
             format!(" {} ", action_state.action.label()),
-            Style::default().fg(theme.panel_text).bg(Color::Black),
+            Style::default().fg(theme.panel_text).bg(theme.button_bg),
         ),
-        (false, false) => Span::styled(
+        _ => Span::styled(
             format!(" {} ", action_state.action.label()),
             Style::default()
-                .fg(theme.help_text)
+                .fg(theme.disabled_text)
                 .bg(theme.panel_bg)
                 .add_modifier(Modifier::DIM),
         ),
     }
+}
+
+fn horizontal_metrics_with_input(state: &DashboardState, include_input: bool) -> HorizontalMetrics {
+    let widths = column_widths(state);
+    let content_width = stable_content_width(state, &widths, include_input).max(MIN_CONTENT_WIDTH);
+
+    HorizontalMetrics {
+        column_widths: widths,
+        content_width,
+    }
+}
+
+fn stable_content_width(state: &DashboardState, widths: &ColumnWidths, include_input: bool) -> u16 {
+    let summary_width = display_width(&format!(
+        "Attached {}  Detached {}  Saved {}",
+        state.summary().attached,
+        state.summary().detached,
+        state.summary().saved
+    )) as u16;
+
+    let session_width = session_content_width(state, widths);
+    let actions_width = action_states(state)
+        .iter()
+        .enumerate()
+        .map(|(index, action_state)| {
+            let spacer = if index == 0 { 0 } else { 2 };
+            spacer + display_width(&format!(" {} ", action_state.action.label())) as u16
+        })
+        .sum::<u16>();
+    let help_width = display_width(
+        "↑↓ select  ←→ action  Enter run  Space command  Esc clear/quit  Ctrl-D quit",
+    ) as u16;
+
+    let base_width = [summary_width, session_width, actions_width, help_width]
+        .into_iter()
+        .max()
+        .unwrap_or(MIN_CONTENT_WIDTH);
+    if !include_input {
+        return base_width;
+    }
+
+    let input_width = input_lines(state, &state.theme)
+        .iter()
+        .map(line_width)
+        .max()
+        .unwrap_or(0);
+
+    base_width.max(input_width)
+}
+
+fn session_content_width(state: &DashboardState, widths: &ColumnWidths) -> u16 {
+    let header_width = display_width(&format_column_row(
+        "ID",
+        "NAME",
+        "STATUS",
+        "MEMORY",
+        "DIRECTORY",
+        widths,
+    )) as u16;
+    let body_width = state
+        .view
+        .groups
+        .iter()
+        .flat_map(|group| {
+            let group_title = group.title.as_ref().map(|title| {
+                display_width(&pad_to_display_width(title, header_width as usize)) as u16
+            });
+            let rows = group.sessions.iter().map(|row| {
+                display_width(&format_column_row(
+                    &row.session_id.to_string(),
+                    &row.name,
+                    row.status_label(),
+                    &row.memory_label(),
+                    &row.directory,
+                    widths,
+                )) as u16
+            });
+            group_title.into_iter().chain(rows)
+        })
+        .max()
+        .unwrap_or(header_width);
+    let totals_width = display_width(&format_column_row(
+        &state.view.totals.filtered_sessions.to_string(),
+        "total sessions",
+        &state.view.totals.filtered_running.to_string(),
+        &format_memory(state.view.totals.filtered_memory_bytes),
+        state.totals_scope_label(),
+        widths,
+    )) as u16;
+
+    header_width.max(body_width).max(totals_width)
 }
 
 fn column_widths(state: &DashboardState) -> ColumnWidths {
@@ -282,11 +369,11 @@ fn session_lines(
     theme: &Theme,
 ) -> Vec<Line<'static>> {
     let header_text = format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", widths);
+    let header_width = display_width(&header_text);
     let mut lines = vec![Line::from(Span::styled(
-        header_text.clone(),
+        header_text,
         Style::default()
             .fg(theme.accent)
-            .bg(theme.panel_bg)
             .add_modifier(Modifier::BOLD),
     ))];
 
@@ -298,10 +385,25 @@ fn session_lines(
             widths,
             state.selected_index,
             &mut session_index,
-            display_width(&header_text),
+            header_width,
             theme,
         );
     }
+
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        format_column_row(
+            &state.view.totals.filtered_sessions.to_string(),
+            "total sessions",
+            &state.view.totals.filtered_running.to_string(),
+            &format_memory(state.view.totals.filtered_memory_bytes),
+            state.totals_scope_label(),
+            widths,
+        ),
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )));
     lines
 }
 
@@ -317,7 +419,9 @@ fn append_group_lines(
     if let Some(title) = &group.title {
         lines.push(Line::from(Span::styled(
             pad_to_display_width(title, header_width),
-            Style::default().fg(theme.muted_text).bg(theme.panel_bg),
+            Style::default()
+                .fg(theme.muted_text)
+                .add_modifier(Modifier::DIM),
         )));
     }
 
@@ -340,17 +444,15 @@ fn append_group_lines(
 fn row_style(selected: bool, row: &DashboardRow, theme: &Theme) -> Style {
     if selected {
         Style::default()
-            .fg(Color::Black)
+            .fg(theme.selection_text)
             .bg(theme.selection_bg)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default()
-            .fg(status_color(row.status, theme))
-            .bg(theme.panel_bg)
+        Style::default().fg(status_color(row.status, theme))
     }
 }
 
-fn status_color(status: SessionStatus, theme: &Theme) -> Color {
+fn status_color(status: SessionStatus, theme: &Theme) -> ratatui::style::Color {
     match status {
         SessionStatus::RunningAttached => theme.success,
         SessionStatus::RunningDetached => theme.warning,
@@ -358,22 +460,22 @@ fn status_color(status: SessionStatus, theme: &Theme) -> Color {
     }
 }
 
-fn selected_line_index(state: &DashboardState) -> usize {
-    let mut line_index = 1;
+fn selected_body_line_index(state: &DashboardState) -> usize {
+    let mut body_index = 0;
     let mut session_index = 0;
     for group in &state.view.groups {
         if group.title.is_some() {
-            line_index += 1;
+            body_index += 1;
         }
         for _row in &group.sessions {
             if session_index == state.selected_index {
-                return line_index;
+                return body_index;
             }
             session_index += 1;
-            line_index += 1;
+            body_index += 1;
         }
     }
-    1
+    0
 }
 
 fn input_cursor_offset(state: &DashboardState) -> u16 {
@@ -390,8 +492,4 @@ fn line_width(line: &Line<'_>) -> u16 {
         .iter()
         .map(|span| display_width(&span.content) as u16)
         .sum()
-}
-
-fn lines_width(lines: &[Line<'_>]) -> u16 {
-    lines.iter().map(line_width).max().unwrap_or(0)
 }
