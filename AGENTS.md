@@ -29,6 +29,8 @@ The binary supports test-only environment overrides for isolation:
 
 Feature tests should set these through the shared harness rather than ad hoc environment setup.
 
+For manual visual inspection, set `OC_THEME=light` or `OC_THEME=dark` when terminal background detection is unreliable through tmux/SSH.
+
 TDD is enforced via `cargo ratchet` (the `tdd-ratchet` crate). CI runs `cargo ratchet` instead of `cargo test` directly.
 
 ### Tmux session cleanup

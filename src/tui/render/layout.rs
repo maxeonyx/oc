@@ -17,15 +17,15 @@ pub fn compute_layout(area: Rect, render_model: &RenderModel) -> DashboardLayout
     let input_content_height = render_model
         .input_content_height()
         .clamp(MIN_INPUT_CONTENT_HEIGHT, MAX_INPUT_CONTENT_HEIGHT);
-    let fixed_height = fixed_section_height(input_content_height);
+    let non_list_height = non_list_panels_height(input_content_height);
     let list_content_height = (render_model
         .session_table
         .line_count()
         .max(MIN_LIST_CONTENT_HEIGHT as usize) as u16)
-        .min(area.height.saturating_sub(fixed_height))
+        .min(area.height.saturating_sub(non_list_height))
         .max(MIN_LIST_CONTENT_HEIGHT);
     let min_height = minimum_panel_height(input_content_height).min(area.height.max(1));
-    let desired_height = fixed_height + list_content_height;
+    let desired_height = non_list_height + panel_height(list_content_height);
     let outer_height = desired_height.min(area.height).max(min_height);
 
     let desired_width = render_model
@@ -47,7 +47,6 @@ pub fn compute_layout(area: Rect, render_model: &RenderModel) -> DashboardLayout
         .split(outer);
 
     DashboardLayout {
-        outer,
         input: PanelLayout::new(sections[0]),
         summary: PanelLayout::new(sections[1]),
         list: PanelLayout::new(sections[2]),
@@ -92,20 +91,15 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     vertical[1]
 }
 
-fn fixed_section_height(input_content_height: u16) -> u16 {
+fn non_list_panels_height(input_content_height: u16) -> u16 {
     panel_height(input_content_height)
         + panel_height(SUMMARY_CONTENT_HEIGHT)
         + panel_height(ACTIONS_CONTENT_HEIGHT)
         + panel_height(HELP_CONTENT_HEIGHT)
-        + (PANEL_EDGE_HEIGHT * 2)
 }
 
 fn minimum_panel_height(input_content_height: u16) -> u16 {
-    panel_height(input_content_height)
-        + panel_height(SUMMARY_CONTENT_HEIGHT)
-        + panel_height(MIN_LIST_CONTENT_HEIGHT)
-        + panel_height(ACTIONS_CONTENT_HEIGHT)
-        + panel_height(HELP_CONTENT_HEIGHT)
+    non_list_panels_height(input_content_height) + panel_height(MIN_LIST_CONTENT_HEIGHT)
 }
 
 #[derive(Clone, Copy)]
@@ -139,7 +133,6 @@ impl PanelLayout {
 
 #[derive(Clone, Copy)]
 pub struct DashboardLayout {
-    pub outer: Rect,
     pub input: PanelLayout,
     pub summary: PanelLayout,
     pub list: PanelLayout,
