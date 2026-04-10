@@ -245,7 +245,6 @@ create_fixture() {
   local -a alias_names=()
   local -a alias_dirs=()
   register_aliases "$oc_bin" "$db_path" "$tmux_prefix" "$fixture_root" alias_names alias_dirs
-  set_saved_session_id "$db_path" "ses-demo" "ses_fixture_demo_123"
 
   local attached_name=${alias_names[0]}
   local attached_dir=${alias_dirs[0]}
@@ -253,6 +252,9 @@ create_fixture() {
   local detached_one_dir=${alias_dirs[1]}
   local detached_two_name=${alias_names[2]}
   local detached_two_dir=${alias_dirs[2]}
+
+  set_saved_session_id "$db_path" "ses-demo" "ses_fixture_demo_123"
+  set_saved_session_id "$db_path" "$attached_name" "ses_fixture_running_123"
 
   start_detached_session "$tmux_prefix$attached_name" "$attached_dir"
   spawn_attached_client "$tmux_prefix$attached_name" "$pid_file" "$attached_log"
