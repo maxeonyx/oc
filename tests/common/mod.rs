@@ -2,7 +2,7 @@
 
 use assert_cmd::Command;
 use rand::Rng;
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, params};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -147,6 +147,44 @@ pub fn create_tmux_session_in_dir(session_name: &str, directory: &Path) {
             "Failed to create tmux session {} in {}\nstdout:\n{}\nstderr:\n{}",
             session_name,
             directory,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+pub fn create_tmux_session_in_dir_with_size(
+    session_name: &str,
+    directory: &Path,
+    width: u16,
+    height: u16,
+) {
+    let directory = directory
+        .to_str()
+        .unwrap_or_else(|| panic!("Directory should be valid UTF-8: {}", directory.display()));
+    let output = run_tmux_output(
+        &[
+            "new-session",
+            "-d",
+            "-x",
+            &width.to_string(),
+            "-y",
+            &height.to_string(),
+            "-s",
+            session_name,
+            "-c",
+            directory,
+        ],
+        "create tmux session for test in directory with size",
+    );
+
+    if !output.status.success() {
+        panic!(
+            "Failed to create tmux session {} in {} sized {}x{}\nstdout:\n{}\nstderr:\n{}",
+            session_name,
+            directory,
+            width,
+            height,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -655,6 +693,29 @@ pub fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
         .expect("session rows should be readable")
         .collect::<Result<Vec<_>, _>>()
         .expect("session rows should decode")
+}
+
+pub fn update_saved_session_opencode_session_id(db_path: &Path, name: &str, session_id: &str) {
+    let connection = Connection::open(db_path)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    let updated = connection
+        .execute(
+            "UPDATE sessions SET opencode_session_id = ?1 WHERE name = ?2",
+            params![session_id, name],
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "Failed to update OpenCode session ID for {}: {}",
+                name, error
+            )
+        });
+
+    assert_eq!(
+        updated, 1,
+        "Expected exactly one saved session named {}",
+        name
+    );
 }
 
 pub fn saved_session_row(

@@ -2,6 +2,7 @@ use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
 use oc::tui::command::{CommandParseError, parse_command};
 use oc::tui::filter::{build_view, summary_for_view, totals_for_rows, totals_scope_label};
+use oc::tui::format::abbreviate_directory;
 use oc::tui::selection::{
     cycle_action_for_row, preferred_action_for_row, select_index, select_index_for_input,
 };
@@ -392,6 +393,19 @@ fn totals_scope_label_depends_on_filter_state() {
         totals_scope_label(InputMode::Command, "restart dc"),
         "all sessions"
     );
+}
+
+#[test]
+fn directory_abbreviation_handles_root_parent_without_double_slash() {
+    let saved_session = SavedSession {
+        id: 1,
+        name: String::from("tmp"),
+        directory: PathBuf::from("/tmp"),
+        opencode_session_id: None,
+        opencode_args: Vec::new(),
+    };
+
+    assert_eq!(abbreviate_directory(&saved_session), "/…");
 }
 
 #[test]
