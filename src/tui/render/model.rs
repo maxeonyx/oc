@@ -6,7 +6,8 @@ use crate::session::SessionStatus;
 
 use super::theme::Theme;
 use crate::tui::format::{
-    ColumnWidths, display_width, format_column_row, format_memory, pad_to_display_width,
+    ColumnWidths, center_to_display_width, display_width, format_column_row, format_memory,
+    pad_to_display_width,
 };
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
@@ -418,7 +419,7 @@ fn append_group_lines(
 ) {
     if let Some(title) = &group.title {
         lines.push(Line::from(Span::styled(
-            pad_to_display_width(title, header_width),
+            center_to_display_width(title, header_width),
             Style::default()
                 .fg(theme.muted_text)
                 .add_modifier(Modifier::DIM),

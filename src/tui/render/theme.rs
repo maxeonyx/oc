@@ -1,13 +1,18 @@
 use std::env;
-use std::fs::OpenOptions;
-use std::io::{Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use palette::{FromColor, Hsl, Srgb};
 use ratatui::style::Color;
+use terminal_colorsaurus::{
+    ColorPalette, QueryOptions, ThemeMode as DetectedThemeMode, color_palette,
+};
 
-const O_NONBLOCK: i32 = 0o4000;
-const OSC_QUERY_TIMEOUT: Duration = Duration::from_millis(120);
+const COLOR_QUERY_TIMEOUT: Duration = Duration::from_millis(400);
+const MIN_PANEL_CONTRAST: f32 = 1.18;
+const MIN_BUTTON_CONTRAST: f32 = 1.12;
+const MIN_SELECTION_CONTRAST: f32 = 1.35;
+const MIN_MUTED_CONTRAST: f32 = 2.4;
+const MIN_DISABLED_CONTRAST: f32 = 1.8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
@@ -31,27 +36,81 @@ enum ThemeMode {
     Dark,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RgbColor {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PaletteSeed {
+    foreground: RgbColor,
+    background: RgbColor,
+    mode: ThemeMode,
+}
+
 pub fn detect_theme() -> Theme {
-    match detect_theme_mode() {
-        ThemeMode::Light => light_theme(),
-        ThemeMode::Dark => dark_theme(),
+    let override_mode = theme_mode_from_override();
+    let detected_palette = palette_seed_from_terminal();
+    let colorfgbg_palette = palette_seed_from_colorfgbg();
+    let mode = override_mode
+        .or(detected_palette.map(|palette| palette.mode))
+        .or(colorfgbg_palette.map(|palette| palette.mode))
+        .unwrap_or(ThemeMode::Dark);
+
+    let palette = detected_palette
+        .or(colorfgbg_palette)
+        .unwrap_or_else(|| default_palette_seed(mode));
+
+    build_theme(mode, palette.background, palette.foreground)
+}
+
+fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> Theme {
+    let panel_bg = derive_surface(background, mode, 0.08, 0.55, MIN_PANEL_CONTRAST);
+    let button_bg = derive_nested_surface(panel_bg, mode, 0.05, 0.75, MIN_BUTTON_CONTRAST);
+    let selection_bg = derive_surface(background, mode, 0.18, 0.7, MIN_SELECTION_CONTRAST);
+    let muted_text = derive_subdued_text(panel_bg, foreground, MIN_MUTED_CONTRAST, 0.48);
+    let disabled_text = derive_subdued_text(button_bg, foreground, MIN_DISABLED_CONTRAST, 0.28);
+    let selection_text = best_text_color(selection_bg, foreground, background);
+
+    Theme {
+        outer_bg: Color::Reset,
+        panel_bg: panel_bg.into(),
+        panel_text: foreground.into(),
+        muted_text: muted_text.into(),
+        accent: Color::Indexed(6),
+        success: Color::Indexed(2),
+        warning: Color::Indexed(3),
+        selection_bg: selection_bg.into(),
+        selection_text: selection_text.into(),
+        button_bg: button_bg.into(),
+        disabled_text: disabled_text.into(),
+        help_text: muted_text.into(),
     }
 }
 
-fn detect_theme_mode() -> ThemeMode {
-    if let Some(mode) = theme_mode_from_override() {
-        return mode;
-    }
+fn palette_seed_from_terminal() -> Option<PaletteSeed> {
+    let mut options = QueryOptions::default();
+    options.timeout = COLOR_QUERY_TIMEOUT;
 
-    if let Some(mode) = theme_mode_from_osc_11() {
-        return mode;
-    }
+    let palette = color_palette(options).ok()?;
+    let mode = theme_mode_from_palette(&palette);
+    let foreground = palette.foreground.clone().into();
+    let background = palette.background.clone().into();
 
-    if let Some(mode) = theme_mode_from_colorfgbg() {
-        return mode;
-    }
+    Some(PaletteSeed {
+        foreground,
+        background,
+        mode,
+    })
+}
 
-    ThemeMode::Dark
+fn theme_mode_from_palette(palette: &ColorPalette) -> ThemeMode {
+    match palette.theme_mode() {
+        DetectedThemeMode::Light => ThemeMode::Light,
+        DetectedThemeMode::Dark => ThemeMode::Dark,
+    }
 }
 
 fn theme_mode_from_override() -> Option<ThemeMode> {
@@ -62,143 +121,224 @@ fn theme_mode_from_override() -> Option<ThemeMode> {
     }
 }
 
-fn theme_mode_from_colorfgbg() -> Option<ThemeMode> {
-    let colorfgbg = env::var("COLORFGBG").ok()?;
-    let background = colorfgbg.split(';').next_back()?.parse::<u8>().ok()?;
+fn palette_seed_from_colorfgbg() -> Option<PaletteSeed> {
+    let (foreground_index, background_index) =
+        parse_colorfgbg_indices(&env::var("COLORFGBG").ok()?)?;
 
-    Some(if background <= 6 || background == 8 {
-        ThemeMode::Dark
-    } else {
-        ThemeMode::Light
+    Some(PaletteSeed {
+        foreground: ansi_index_rgb(foreground_index),
+        background: ansi_index_rgb(background_index),
+        mode: if background_index <= 6 || background_index == 8 {
+            ThemeMode::Dark
+        } else {
+            ThemeMode::Light
+        },
     })
 }
 
-fn theme_mode_from_osc_11() -> Option<ThemeMode> {
-    let mut tty = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .custom_flags(O_NONBLOCK)
-        .open("/dev/tty")
-        .ok()?;
+fn parse_colorfgbg_indices(value: &str) -> Option<(u8, u8)> {
+    let numbers = value
+        .split(';')
+        .filter_map(|part| part.parse::<u8>().ok())
+        .collect::<Vec<_>>();
 
-    clear_pending_tty_bytes(&mut tty);
-    tty.write_all(background_query_sequence().as_bytes()).ok()?;
-    tty.flush().ok()?;
-
-    let response = read_osc_response(&mut tty, OSC_QUERY_TIMEOUT)?;
-    let (red, green, blue) = parse_background_color(&response)?;
-
-    Some(if perceived_luma(red, green, blue) >= 0.5 {
-        ThemeMode::Light
-    } else {
-        ThemeMode::Dark
-    })
-}
-
-fn background_query_sequence() -> String {
-    let osc = "\x1b]11;?\x07";
-    if env::var_os("TMUX").is_some() {
-        format!("\x1bPtmux;\x1b{osc}\x1b\\")
-    } else {
-        String::from(osc)
+    match numbers.as_slice() {
+        [foreground, background] => Some((*foreground, *background)),
+        [.., foreground, background] => Some((*foreground, *background)),
+        _ => None,
     }
 }
 
-fn clear_pending_tty_bytes(tty: &mut std::fs::File) {
-    let mut buffer = [0u8; 256];
-    while tty.read(&mut buffer).is_ok_and(|count| count > 0) {}
+fn default_palette_seed(mode: ThemeMode) -> PaletteSeed {
+    match mode {
+        ThemeMode::Light => PaletteSeed {
+            foreground: RgbColor::new(0x22, 0x22, 0x22),
+            background: RgbColor::new(0xf7, 0xf4, 0xf3),
+            mode,
+        },
+        ThemeMode::Dark => PaletteSeed {
+            foreground: RgbColor::new(0xe8, 0xe6, 0xe3),
+            background: RgbColor::new(0x14, 0x16, 0x1a),
+            mode,
+        },
+    }
 }
 
-fn read_osc_response(tty: &mut std::fs::File, timeout: Duration) -> Option<String> {
-    let deadline = Instant::now() + timeout;
-    let mut buffer = Vec::new();
+fn derive_surface(
+    base: RgbColor,
+    mode: ThemeMode,
+    starting_delta: f32,
+    saturation_scale: f32,
+    min_contrast: f32,
+) -> RgbColor {
+    let mut delta = starting_delta;
+    let mut candidate = shift_lightness(base, mode, delta, saturation_scale);
 
-    while Instant::now() < deadline {
-        let mut chunk = [0u8; 256];
-        match tty.read(&mut chunk) {
-            Ok(0) => std::thread::sleep(Duration::from_millis(10)),
-            Ok(count) => {
-                buffer.extend_from_slice(&chunk[..count]);
-                if buffer.ends_with(b"\x07") || buffer.windows(2).any(|window| window == b"\x1b\\")
-                {
-                    return String::from_utf8(buffer).ok();
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(_) => return None,
+    while contrast_ratio(candidate, base) < min_contrast && delta < 0.32 {
+        delta += 0.02;
+        candidate = shift_lightness(base, mode, delta, saturation_scale);
+    }
+
+    candidate
+}
+
+fn derive_nested_surface(
+    base: RgbColor,
+    mode: ThemeMode,
+    starting_delta: f32,
+    saturation_scale: f32,
+    min_contrast: f32,
+) -> RgbColor {
+    let mut delta = starting_delta;
+    let mut candidate = shift_lightness(base, mode, delta, saturation_scale);
+
+    while contrast_ratio(candidate, base) < min_contrast && delta < 0.2 {
+        delta += 0.015;
+        candidate = shift_lightness(base, mode, delta, saturation_scale);
+    }
+
+    candidate
+}
+
+fn derive_subdued_text(
+    background: RgbColor,
+    foreground: RgbColor,
+    min_contrast: f32,
+    mut foreground_weight: f32,
+) -> RgbColor {
+    let mut candidate = mix(background, foreground, foreground_weight);
+
+    while contrast_ratio(candidate, background) < min_contrast && foreground_weight < 0.92 {
+        foreground_weight += 0.08;
+        candidate = mix(background, foreground, foreground_weight);
+    }
+
+    candidate
+}
+
+fn best_text_color(
+    background: RgbColor,
+    terminal_foreground: RgbColor,
+    terminal_background: RgbColor,
+) -> RgbColor {
+    [
+        terminal_foreground,
+        terminal_background,
+        RgbColor::new(0x00, 0x00, 0x00),
+        RgbColor::new(0xff, 0xff, 0xff),
+    ]
+    .into_iter()
+    .max_by(|left, right| {
+        contrast_ratio(*left, background).total_cmp(&contrast_ratio(*right, background))
+    })
+    .unwrap_or(terminal_foreground)
+}
+
+fn shift_lightness(base: RgbColor, mode: ThemeMode, delta: f32, saturation_scale: f32) -> RgbColor {
+    let mut hsl = Hsl::from_color(base.to_srgb());
+    hsl.saturation = (hsl.saturation * saturation_scale).clamp(0.0, 1.0);
+    hsl.lightness = match mode {
+        ThemeMode::Light => (hsl.lightness - delta).clamp(0.0, 1.0),
+        ThemeMode::Dark => (hsl.lightness + delta).clamp(0.0, 1.0),
+    };
+
+    RgbColor::from_srgb(Srgb::from_color(hsl))
+}
+
+fn mix(background: RgbColor, foreground: RgbColor, foreground_weight: f32) -> RgbColor {
+    let background_weight = 1.0 - foreground_weight;
+
+    RgbColor::new(
+        ((background.r as f32 * background_weight) + (foreground.r as f32 * foreground_weight))
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        ((background.g as f32 * background_weight) + (foreground.g as f32 * foreground_weight))
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        ((background.b as f32 * background_weight) + (foreground.b as f32 * foreground_weight))
+            .round()
+            .clamp(0.0, 255.0) as u8,
+    )
+}
+
+fn contrast_ratio(left: RgbColor, right: RgbColor) -> f32 {
+    let left_luminance = relative_luminance(left);
+    let right_luminance = relative_luminance(right);
+    let brighter = left_luminance.max(right_luminance);
+    let darker = left_luminance.min(right_luminance);
+
+    (brighter + 0.05) / (darker + 0.05)
+}
+
+fn relative_luminance(color: RgbColor) -> f32 {
+    let linearize = |component: u8| {
+        let channel = component as f32 / 255.0;
+        if channel <= 0.04045 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
         }
-    }
+    };
 
-    None
+    let red = linearize(color.r);
+    let green = linearize(color.g);
+    let blue = linearize(color.b);
+
+    (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
 }
 
-fn parse_background_color(response: &str) -> Option<(u16, u16, u16)> {
-    let start = response.find("11;")? + 3;
-    let payload = response[start..]
-        .trim_start_matches("rgb:")
-        .trim_start_matches('#')
-        .trim_end_matches('\u{7}')
-        .trim_end_matches("\u{1b}\\")
-        .trim_end_matches('\u{1b}')
-        .trim_end_matches('\\');
-
-    if let Some((red, rest)) = payload.split_once('/') {
-        let (green, blue) = rest.split_once('/')?;
-        return Some((
-            u16::from_str_radix(red, 16).ok()?,
-            u16::from_str_radix(green, 16).ok()?,
-            u16::from_str_radix(blue, 16).ok()?,
-        ));
-    }
-
-    if payload.len() == 6 {
-        return Some((
-            u16::from_str_radix(&payload[0..2], 16).ok()? * 257,
-            u16::from_str_radix(&payload[2..4], 16).ok()? * 257,
-            u16::from_str_radix(&payload[4..6], 16).ok()? * 257,
-        ));
-    }
-
-    None
-}
-
-fn perceived_luma(red: u16, green: u16, blue: u16) -> f32 {
-    let normalize = |value: u16| value as f32 / 65535.0;
-    0.2126 * normalize(red) + 0.7152 * normalize(green) + 0.0722 * normalize(blue)
-}
-
-fn light_theme() -> Theme {
-    Theme {
-        outer_bg: Color::Reset,
-        panel_bg: Color::Gray,
-        panel_text: Color::Black,
-        muted_text: Color::DarkGray,
-        accent: Color::Blue,
-        success: Color::Green,
-        warning: Color::Yellow,
-        selection_bg: Color::Blue,
-        selection_text: Color::White,
-        button_bg: Color::White,
-        disabled_text: Color::DarkGray,
-        help_text: Color::DarkGray,
+fn ansi_index_rgb(index: u8) -> RgbColor {
+    match index {
+        0 => RgbColor::new(0x00, 0x00, 0x00),
+        1 => RgbColor::new(0xcd, 0x00, 0x00),
+        2 => RgbColor::new(0x00, 0xcd, 0x00),
+        3 => RgbColor::new(0xcd, 0xcd, 0x00),
+        4 => RgbColor::new(0x00, 0x00, 0xee),
+        5 => RgbColor::new(0xcd, 0x00, 0xcd),
+        6 => RgbColor::new(0x00, 0xcd, 0xcd),
+        7 => RgbColor::new(0xe5, 0xe5, 0xe5),
+        8 => RgbColor::new(0x7f, 0x7f, 0x7f),
+        9 => RgbColor::new(0xff, 0x00, 0x00),
+        10 => RgbColor::new(0x00, 0xff, 0x00),
+        11 => RgbColor::new(0xff, 0xff, 0x00),
+        12 => RgbColor::new(0x5c, 0x5c, 0xff),
+        13 => RgbColor::new(0xff, 0x00, 0xff),
+        14 => RgbColor::new(0x00, 0xff, 0xff),
+        _ => RgbColor::new(0xff, 0xff, 0xff),
     }
 }
 
-fn dark_theme() -> Theme {
-    Theme {
-        outer_bg: Color::Reset,
-        panel_bg: Color::DarkGray,
-        panel_text: Color::White,
-        muted_text: Color::Gray,
-        accent: Color::Cyan,
-        success: Color::Green,
-        warning: Color::Yellow,
-        selection_bg: Color::Cyan,
-        selection_text: Color::Black,
-        button_bg: Color::Black,
-        disabled_text: Color::Gray,
-        help_text: Color::Gray,
+impl RgbColor {
+    const fn new(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
+    }
+
+    fn to_srgb(self) -> Srgb<f32> {
+        Srgb::new(
+            self.r as f32 / 255.0,
+            self.g as f32 / 255.0,
+            self.b as f32 / 255.0,
+        )
+    }
+
+    fn from_srgb(color: Srgb<f32>) -> Self {
+        Self::new(
+            (color.red.clamp(0.0, 1.0) * 255.0).round() as u8,
+            (color.green.clamp(0.0, 1.0) * 255.0).round() as u8,
+            (color.blue.clamp(0.0, 1.0) * 255.0).round() as u8,
+        )
+    }
+}
+
+impl From<RgbColor> for Color {
+    fn from(value: RgbColor) -> Self {
+        Color::Rgb(value.r, value.g, value.b)
+    }
+}
+
+impl From<terminal_colorsaurus::Color> for RgbColor {
+    fn from(value: terminal_colorsaurus::Color) -> Self {
+        let (r, g, b) = value.scale_to_8bit();
+        Self::new(r, g, b)
     }
 }

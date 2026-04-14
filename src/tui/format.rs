@@ -65,6 +65,20 @@ pub fn pad_to_display_width(text: &str, target_width: usize) -> String {
     format!("{text}{}", " ".repeat(padding_width))
 }
 
+pub fn center_to_display_width(text: &str, target_width: usize) -> String {
+    let content_width = display_width(text);
+    let total_padding = target_width.saturating_sub(content_width);
+    let left_padding = total_padding / 2;
+    let right_padding = total_padding.saturating_sub(left_padding);
+
+    format!(
+        "{}{}{}",
+        " ".repeat(left_padding),
+        text,
+        " ".repeat(right_padding)
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColumnWidths {
     pub id: usize,
