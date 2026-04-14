@@ -108,7 +108,7 @@ The input bar lives at the **top** of the TUI. Typing goes there.
 - **Ctrl-D** quits the TUI (only with empty input)
 - **Backspace** — if it removes the last space, immediately returns to filter mode
 
-No single-letter hotkeys. They conflict with type-to-filter.
+No single-letter hotkeys — they conflict with type-to-filter. For example, `q` can't mean "quit" because `q` is a valid filter character (typing `q` should filter the session list, not exit the app).
 
 ### Action bar
 
