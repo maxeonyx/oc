@@ -127,6 +127,23 @@ if updated != 1:
 PY
 }
 
+fixture_dir_for_name() {
+  local requested_name=$1
+  shift
+  local -a names=("$@")
+  local index
+
+  for index in "${!names[@]}"; do
+    if [[ "${names[$index]}" == "$requested_name" ]]; then
+      printf '%s\n' "$index"
+      return
+    fi
+  done
+
+  printf 'Fixture alias not found: %s\n' "$requested_name" >&2
+  exit 1
+}
+
 start_detached_session() {
   local session_name=$1
   local directory=$2
@@ -246,12 +263,19 @@ create_fixture() {
   local -a alias_dirs=()
   register_aliases "$oc_bin" "$db_path" "$tmux_prefix" "$fixture_root" alias_names alias_dirs
 
-  local attached_name=${alias_names[0]}
-  local attached_dir=${alias_dirs[0]}
-  local detached_one_name=${alias_names[1]}
-  local detached_one_dir=${alias_dirs[1]}
-  local detached_two_name=${alias_names[2]}
-  local detached_two_dir=${alias_dirs[2]}
+  local attached_index
+  attached_index=$(fixture_dir_for_name "job-117" "${alias_names[@]}")
+  local detached_one_index
+  detached_one_index=$(fixture_dir_for_name "cfg" "${alias_names[@]}")
+  local detached_two_index
+  detached_two_index=$(fixture_dir_for_name "ses-demo" "${alias_names[@]}")
+
+  local attached_name=${alias_names[$attached_index]}
+  local attached_dir=${alias_dirs[$attached_index]}
+  local detached_one_name=${alias_names[$detached_one_index]}
+  local detached_one_dir=${alias_dirs[$detached_one_index]}
+  local detached_two_name=${alias_names[$detached_two_index]}
+  local detached_two_dir=${alias_dirs[$detached_two_index]}
 
   set_saved_session_id "$db_path" "ses-demo" "ses_fixture_demo_123"
   set_saved_session_id "$db_path" "$attached_name" "ses_fixture_running_123"
