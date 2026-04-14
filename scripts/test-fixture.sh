@@ -233,7 +233,7 @@ create_fixture() {
   mkdir -p "$fixture_root/projects/alpha-01" "$fixture_root/projects/alpha-ops" "$fixture_root/projects/job-117" "$fixture_root/projects/ses-demo"
   local tmux_token
   tmux_token=$(sanitize_tmux_token "$(basename "$fixture_dir")")
-  local tmux_prefix="oc-fixture-$tmux_token-"
+  local tmux_prefix=${OC_TMUX_PREFIX:-"oc-fixture-$tmux_token-"}
   local pid_file="$fixture_dir/attached-client-pids"
   local dump_file="$fixture_dir/session-list.txt"
   local attached_log="$fixture_dir/attached-client.log"

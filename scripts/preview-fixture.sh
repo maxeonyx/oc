@@ -6,6 +6,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 TMP_ROOT=${TMPDIR:-/tmp}
 FIXTURE_PATTERN="$TMP_ROOT/oc-test-fixture.*"
+PREVIEW_TMUX_PREFIX="oc2-preview-"
 
 usage() {
   cat <<'EOF'
@@ -25,10 +26,31 @@ EOF
 
 cleanup_one_fixture() {
   local fixture_dir=$1
+  local fixture_tmux_prefix=
+
+  if [[ -f "$fixture_dir/fixture.env" ]]; then
+    # shellcheck disable=SC1090
+    source "$fixture_dir/fixture.env"
+    fixture_tmux_prefix=${OC_TMUX_PREFIX:-}
+  fi
 
   if [[ -f "$fixture_dir/fixture.env" ]]; then
     "$SCRIPT_DIR/test-fixture.sh" cleanup "$fixture_dir" >/dev/null 2>&1 || true
   fi
+
+  if [[ -n "$fixture_tmux_prefix" ]]; then
+    while IFS= read -r session_name; do
+      [[ "$session_name" == "$fixture_tmux_prefix"* ]] || continue
+      tmux detach-client -s "$session_name" >/dev/null 2>&1 || true
+      tmux kill-session -t "$session_name" >/dev/null 2>&1 || true
+    done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+  fi
+
+  while IFS= read -r session_name; do
+    [[ "$session_name" == "$PREVIEW_TMUX_PREFIX"* ]] || continue
+    tmux detach-client -s "$session_name" >/dev/null 2>&1 || true
+    tmux kill-session -t "$session_name" >/dev/null 2>&1 || true
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
 
   rm -rf "$fixture_dir"
 }
@@ -99,7 +121,7 @@ cargo build --manifest-path "$REPO_ROOT/Cargo.toml"
 cleanup_existing_fixtures
 
 fixture_dir=$(mktemp -d "$TMP_ROOT/oc-test-fixture.XXXXXX")
-OC_TEST_FIXTURE_DIR="$fixture_dir" "$SCRIPT_DIR/test-fixture.sh" setup >/dev/null
+OC_TEST_FIXTURE_DIR="$fixture_dir" OC_TMUX_PREFIX="$PREVIEW_TMUX_PREFIX" "$SCRIPT_DIR/test-fixture.sh" setup >/dev/null
 
 # shellcheck disable=SC1090
 source "$fixture_dir/fixture.env"
