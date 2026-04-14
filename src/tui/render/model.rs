@@ -6,8 +6,8 @@ use crate::session::SessionStatus;
 
 use super::theme::Theme;
 use crate::tui::format::{
-    ColumnWidths, center_to_display_width, display_width, format_column_row, format_memory,
-    pad_to_display_width,
+    center_to_display_width, display_width, format_column_row, format_memory, pad_to_display_width,
+    ColumnWidths,
 };
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
@@ -46,6 +46,7 @@ pub struct RenderModel {
     pub help_line: Line<'static>,
     content_width: u16,
     input_cursor_offset: u16,
+    show_cursor: bool,
 }
 
 pub struct SessionTable {
@@ -74,6 +75,7 @@ impl RenderModel {
             help_line: help_line(&state.theme),
             content_width: metrics.content_width,
             input_cursor_offset: input_cursor_offset(state),
+            show_cursor: should_show_cursor(state),
         }
     }
 
@@ -90,6 +92,10 @@ impl RenderModel {
             x: area.x + self.input_cursor_offset,
             y: area.y,
         }
+    }
+
+    pub fn show_cursor(&self) -> bool {
+        self.show_cursor
     }
 }
 
@@ -486,6 +492,11 @@ fn input_cursor_offset(state: &DashboardState) -> u16 {
     };
 
     (display_width(prefix) + display_width(&state.input_text)) as u16
+}
+
+fn should_show_cursor(state: &DashboardState) -> bool {
+    matches!(state.input_mode, InputMode::Command)
+        || (matches!(state.input_mode, InputMode::Filter) && !state.input_text.is_empty())
 }
 
 fn line_width(line: &Line<'_>) -> u16 {

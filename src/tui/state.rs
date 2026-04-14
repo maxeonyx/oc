@@ -1,11 +1,12 @@
 use anyhow::{Context, Result};
+use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use std::io::{self, Stdout};
+use ratatui::Terminal;
+use std::io::{self, BufWriter, Stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
@@ -14,14 +15,14 @@ use std::time::{Duration, Instant};
 use crate::commands;
 use crate::service::SessionService;
 
-use super::command::{CommandParseError, parse_command};
+use super::command::{parse_command, CommandParseError};
 use super::filter::{build_view, summary_for_view, totals_scope_label};
-use super::input::{InputIntent, map_key_event};
+use super::input::{map_key_event, InputIntent};
 use super::render;
 use super::render::{HorizontalMetrics, Theme};
 use super::selection::{
-    SelectedSession, available_actions, cycle_action_for_row, preferred_action_for_row,
-    select_index_for_input,
+    available_actions, cycle_action_for_row, preferred_action_for_row, select_index_for_input,
+    SelectedSession,
 };
 use super::types::{
     DashboardAction, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,
@@ -436,16 +437,17 @@ fn format_command_error(error: CommandParseError) -> String {
 }
 
 struct TerminalGuard {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    terminal: Terminal<CrosstermBackend<BufWriter<Stdout>>>,
 }
 
 impl TerminalGuard {
     fn enter() -> Result<Self> {
         enable_raw_mode().context("failed to enable terminal raw mode")?;
-        crossterm::execute!(io::stdout(), EnterAlternateScreen)
+        let mut stdout = BufWriter::new(io::stdout());
+        crossterm::execute!(&mut stdout, EnterAlternateScreen, Hide)
             .context("failed to enter alternate screen")?;
 
-        let backend = CrosstermBackend::new(io::stdout());
+        let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend).context("failed to create terminal backend")?;
         terminal.clear().context("failed to clear terminal")?;
 
@@ -466,7 +468,7 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
     }
 }

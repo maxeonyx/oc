@@ -3,14 +3,14 @@ mod model;
 mod theme;
 
 use ratatui::widgets::{Clear, Paragraph, Widget};
-use ratatui::{Frame, layout::Rect, style::Style, text::Line};
+use ratatui::{layout::Rect, style::Style, text::Line, Frame};
 
 use super::state::DashboardState;
-use layout::{PanelLayout, compute_layout};
+use layout::{compute_layout, PanelLayout};
 use model::RenderModel;
 
-pub use model::{HorizontalMetrics, expansion_candidate_metrics, horizontal_metrics};
-pub use theme::{Theme, detect_theme};
+pub use model::{expansion_candidate_metrics, horizontal_metrics, HorizontalMetrics};
+pub use theme::{detect_theme, Theme};
 
 pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
     let metrics = state.effective_horizontal_metrics();
@@ -62,8 +62,10 @@ pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
         state.theme.outer_bg,
     );
 
-    let cursor = render_model.cursor_position(layout.input.content);
-    frame.set_cursor_position((cursor.x, cursor.y));
+    if render_model.show_cursor() {
+        let cursor = render_model.cursor_position(layout.input.content);
+        frame.set_cursor_position((cursor.x, cursor.y));
+    }
 }
 
 fn render_panel(
