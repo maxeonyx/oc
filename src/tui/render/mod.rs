@@ -6,7 +6,7 @@ use ratatui::widgets::{Clear, Paragraph, Widget};
 use ratatui::{layout::Rect, style::Style, text::Line, Frame};
 
 use super::state::DashboardState;
-use layout::{compute_layout, PanelLayout};
+use layout::{compute_layout, ContainerLayout, PanelLayout};
 use model::RenderModel;
 
 pub use model::{expansion_candidate_metrics, horizontal_metrics, HorizontalMetrics};
@@ -22,6 +22,12 @@ pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
         frame,
         frame.area(),
         Style::default().bg(state.theme.outer_bg),
+    );
+    render_container(
+        frame,
+        layout.container,
+        state.theme.container_bg,
+        state.theme.outer_bg,
     );
 
     render_panel(
@@ -68,6 +74,17 @@ pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
     }
 }
 
+fn render_container(
+    frame: &mut Frame<'_>,
+    container: ContainerLayout,
+    container_bg: ratatui::style::Color,
+    outer_bg: ratatui::style::Color,
+) {
+    fill_rect(frame, container.content, Style::default().bg(container_bg));
+    render_edge(frame, container.top_edge, '▄', container_bg, outer_bg);
+    render_edge(frame, container.bottom_edge, '▀', container_bg, outer_bg);
+}
+
 fn render_panel(
     frame: &mut Frame<'_>,
     panel: PanelLayout,
@@ -75,7 +92,13 @@ fn render_panel(
     panel_bg: ratatui::style::Color,
     outer_bg: ratatui::style::Color,
 ) {
-    fill_rect(frame, panel.content, Style::default().bg(panel_bg));
+    let panel_background = Rect::new(
+        panel.top_edge.x,
+        panel.content.y,
+        panel.top_edge.width,
+        panel.content.height,
+    );
+    fill_rect(frame, panel_background, Style::default().bg(panel_bg));
     render_edge(frame, panel.top_edge, '▄', panel_bg, outer_bg);
     render_edge(frame, panel.bottom_edge, '▀', panel_bg, outer_bg);
     Paragraph::new(lines.to_vec()).render(panel.content, frame.buffer_mut());

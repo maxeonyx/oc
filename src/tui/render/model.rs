@@ -6,8 +6,7 @@ use crate::session::SessionStatus;
 
 use super::theme::Theme;
 use crate::tui::format::{
-    center_to_display_width, display_width, format_column_row, format_memory, pad_to_display_width,
-    ColumnWidths,
+    centered_rule, display_width, format_column_row, format_memory, ColumnWidths,
 };
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
@@ -188,16 +187,23 @@ fn input_lines(state: &DashboardState, theme: &Theme) -> Vec<Line<'static>> {
 
 fn action_lines(state: &DashboardState, theme: &Theme) -> Vec<Line<'static>> {
     let action_states = action_states(state);
-    let mut action_spans = Vec::new();
+    let mut top = Vec::new();
+    let mut middle = Vec::new();
+    let mut bottom = Vec::new();
 
     for (index, action_state) in action_states.iter().enumerate() {
         if index > 0 {
-            action_spans.push(Span::raw("  "));
+            top.push(Span::raw("  "));
+            middle.push(Span::raw("  "));
+            bottom.push(Span::raw("  "));
         }
-        action_spans.push(action_label_span(action_state, theme));
+
+        top.push(action_padding_span(action_state, theme, '▄'));
+        middle.push(action_label_span(action_state, theme));
+        bottom.push(action_padding_span(action_state, theme, '▀'));
     }
 
-    vec![Line::from(action_spans)]
+    vec![Line::from(top), Line::from(middle), Line::from(bottom)]
 }
 
 fn help_line(theme: &Theme) -> Line<'static> {
@@ -235,13 +241,13 @@ fn action_states(state: &DashboardState) -> Vec<ActionState> {
 
 fn action_label_span(action_state: &ActionState, theme: &Theme) -> Span<'static> {
     match (action_state.selected, action_state.enabled) {
-        (true, true) => Span::styled(
-            format!(" {} ", action_state.action.label()),
-            Style::default()
-                .fg(theme.selection_text)
-                .bg(theme.selection_bg)
-                .add_modifier(Modifier::BOLD),
-        ),
+        (true, true) => {
+            let (fg, bg) = selected_action_colors(action_state.action, theme);
+            Span::styled(
+                format!(" {} ", action_state.action.label()),
+                Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+            )
+        }
         (false, true) => Span::styled(
             format!(" {} ", action_state.action.label()),
             Style::default().fg(theme.panel_text).bg(theme.button_bg),
@@ -253,6 +259,34 @@ fn action_label_span(action_state: &ActionState, theme: &Theme) -> Span<'static>
                 .bg(theme.panel_bg)
                 .add_modifier(Modifier::DIM),
         ),
+    }
+}
+
+fn action_padding_span(action_state: &ActionState, theme: &Theme, ch: char) -> Span<'static> {
+    let label = format!(" {} ", action_state.action.label());
+    let width = display_width(&label);
+    let style = match (action_state.selected, action_state.enabled) {
+        (true, true) => {
+            let (_fg, bg) = selected_action_colors(action_state.action, theme);
+            Style::default().fg(bg).bg(theme.panel_bg)
+        }
+        (false, true) => Style::default().fg(theme.button_bg).bg(theme.panel_bg),
+        _ => Style::default().fg(theme.panel_bg).bg(theme.panel_bg),
+    };
+
+    Span::styled(ch.to_string().repeat(width), style)
+}
+
+fn selected_action_colors(
+    action: DashboardAction,
+    theme: &Theme,
+) -> (ratatui::style::Color, ratatui::style::Color) {
+    match action {
+        DashboardAction::Attach => (theme.action_attach_text, theme.action_attach_bg),
+        DashboardAction::Remove => (theme.action_remove_text, theme.action_remove_bg),
+        DashboardAction::Stop | DashboardAction::Restart => {
+            (theme.action_caution_text, theme.action_caution_bg)
+        }
     }
 }
 
@@ -319,7 +353,7 @@ fn session_content_width(state: &DashboardState, widths: &ColumnWidths) -> u16 {
         .iter()
         .flat_map(|group| {
             let group_title = group.title.as_ref().map(|title| {
-                display_width(&pad_to_display_width(title, header_width as usize)) as u16
+                display_width(&centered_rule(title, header_width as usize, '─')) as u16
             });
             let rows = group.sessions.iter().map(|row| {
                 display_width(&format_column_row(
@@ -425,7 +459,7 @@ fn append_group_lines(
 ) {
     if let Some(title) = &group.title {
         lines.push(Line::from(Span::styled(
-            center_to_display_width(title, header_width),
+            centered_rule(title, header_width, '─'),
             Style::default()
                 .fg(theme.muted_text)
                 .add_modifier(Modifier::DIM),

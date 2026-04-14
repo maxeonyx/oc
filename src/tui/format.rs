@@ -79,6 +79,25 @@ pub fn center_to_display_width(text: &str, target_width: usize) -> String {
     )
 }
 
+pub fn centered_rule(text: &str, target_width: usize, fill: char) -> String {
+    let content = format!(" {text} ");
+    let content_width = display_width(&content);
+    if content_width >= target_width {
+        return center_to_display_width(text, target_width);
+    }
+
+    let total_fill = target_width.saturating_sub(content_width);
+    let left_fill = total_fill / 2;
+    let right_fill = total_fill.saturating_sub(left_fill);
+
+    format!(
+        "{}{}{}",
+        fill.to_string().repeat(left_fill),
+        content,
+        fill.to_string().repeat(right_fill)
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColumnWidths {
     pub id: usize,
