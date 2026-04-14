@@ -69,13 +69,11 @@ fn dashboard_shows_all_seven_sessions_in_fixture_sized_terminal() {
     create_tmux_session_in_dir_with_size(&parent_session_name, env.root_dir(), 120, 60);
     launch_dashboard(&env, &parent_session_name);
 
-    for name in names {
-        let _ = wait_for_tmux_pane_contains(&parent_session_name, name, Duration::from_secs(10));
-    }
     let pane = wait_for_tmux_pane_contains(
         &parent_session_name,
         "total sessions",
         Duration::from_secs(10),
     );
+    assert!(pane.contains("7"), "pane:\n{pane}");
     assert!(pane.contains("total sessions"), "pane:\n{pane}");
 }

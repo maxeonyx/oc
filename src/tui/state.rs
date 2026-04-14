@@ -1,12 +1,11 @@
 use anyhow::{Context, Result};
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
-use std::io::{self, BufWriter, Stdout};
+use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
@@ -437,17 +436,16 @@ fn format_command_error(error: CommandParseError) -> String {
 }
 
 struct TerminalGuard {
-    terminal: Terminal<CrosstermBackend<BufWriter<Stdout>>>,
+    terminal: Terminal<CrosstermBackend<Stdout>>,
 }
 
 impl TerminalGuard {
     fn enter() -> Result<Self> {
         enable_raw_mode().context("failed to enable terminal raw mode")?;
-        let mut stdout = BufWriter::new(io::stdout());
-        crossterm::execute!(&mut stdout, EnterAlternateScreen, Hide)
+        crossterm::execute!(io::stdout(), EnterAlternateScreen)
             .context("failed to enter alternate screen")?;
 
-        let backend = CrosstermBackend::new(stdout);
+        let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend).context("failed to create terminal backend")?;
         terminal.clear().context("failed to clear terminal")?;
 
@@ -468,7 +466,7 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
+        let _ = crossterm::execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
     }
 }
