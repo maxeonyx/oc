@@ -2,7 +2,7 @@
 
 use assert_cmd::Command;
 use rand::Rng;
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{params, Connection, OpenFlags};
 use std::env;
 use std::ffi::OsString;
 use std::fs;

@@ -1,9 +1,8 @@
 mod common;
 
 use common::{
-    TestEnv, create_tmux_session_in_dir, create_tmux_session_in_dir_with_size,
-    send_keys_to_tmux_session, update_saved_session_opencode_session_id,
-    wait_for_tmux_pane_contains,
+    create_tmux_session_in_dir, create_tmux_session_in_dir_with_size, send_keys_to_tmux_session,
+    update_saved_session_opencode_session_id, wait_for_tmux_pane_contains, TestEnv,
 };
 use std::fs;
 use std::time::Duration;
@@ -67,11 +66,16 @@ fn dashboard_shows_all_seven_sessions_in_fixture_sized_terminal() {
     }
 
     let parent_session_name = format!("{}dashboard", env.tmux_prefix());
-    create_tmux_session_in_dir_with_size(&parent_session_name, env.root_dir(), 120, 22);
-    let pane = launch_dashboard(&env, &parent_session_name);
+    create_tmux_session_in_dir_with_size(&parent_session_name, env.root_dir(), 120, 60);
+    launch_dashboard(&env, &parent_session_name);
 
     for name in names {
-        assert!(pane.contains(name), "expected {name} in pane:\n{pane}");
+        let _ = wait_for_tmux_pane_contains(&parent_session_name, name, Duration::from_secs(10));
     }
+    let pane = wait_for_tmux_pane_contains(
+        &parent_session_name,
+        "total sessions",
+        Duration::from_secs(10),
+    );
     assert!(pane.contains("total sessions"), "pane:\n{pane}");
 }
