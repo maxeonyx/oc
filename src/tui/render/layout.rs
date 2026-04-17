@@ -5,6 +5,7 @@ use super::model::{DashboardMetrics, RenderModel};
 const CONTAINER_HORIZONTAL_PADDING: u16 = 2;
 const CONTAINER_EDGE_HEIGHT: u16 = 1;
 const PANEL_HORIZONTAL_PADDING: u16 = 1;
+const ACTIONS_HORIZONTAL_PADDING: u16 = 2;
 const PANEL_EDGE_HEIGHT: u16 = 1;
 const SUMMARY_CONTENT_HEIGHT: u16 = 1;
 const ACTIONS_CONTENT_HEIGHT: u16 = 3;
@@ -58,7 +59,7 @@ pub fn compute_layout(
         input: SurfaceLayout::new(sections[0], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
         summary: SurfaceLayout::new(sections[1], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
         list: SurfaceLayout::new(sections[2], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
-        actions: SurfaceLayout::new(sections[3], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
+        actions: SurfaceLayout::new(sections[3], PANEL_EDGE_HEIGHT, ACTIONS_HORIZONTAL_PADDING),
         help: SurfaceLayout::new(sections[4], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
     }
 }

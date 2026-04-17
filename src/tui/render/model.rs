@@ -19,8 +19,6 @@ const MAX_GROUP_HEADER_LINES: usize = 4;
 const SESSION_FOOTER_LINES: usize = 2;
 const SESSION_HEADER_LINES: usize = 1;
 const BUTTON_MIN_WIDTH: usize = 8;
-const BUTTON_LEFT_PADDING: usize = 2;
-const BUTTON_RIGHT_PADDING: usize = 2;
 const BUTTON_SPACING: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +31,12 @@ pub struct HorizontalMetrics {
 pub struct DashboardMetrics {
     pub horizontal: HorizontalMetrics,
     pub list_content_height: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ActionButtonGeometry {
+    width: usize,
+    spacing: usize,
 }
 
 impl HorizontalMetrics {
@@ -62,7 +66,7 @@ pub struct RenderModel {
     pub summary_row: RowSpec,
     pub input_rows: Vec<RowSpec>,
     pub session_table: SessionTable,
-    pub action_rows: Vec<RowSpec>,
+    action_states: Vec<ActionState>,
     pub help_row: RowSpec,
     input_cursor_offset: u16,
     show_cursor: bool,
@@ -116,7 +120,7 @@ impl RenderModel {
             summary_row: summary_row(state, &state.theme),
             input_rows: input_rows(state, &state.theme),
             session_table,
-            action_rows: action_rows(state, &state.theme),
+            action_states: action_states(state),
             help_row: help_row(&state.theme),
             input_cursor_offset: input_cursor_offset(state),
             show_cursor: should_show_cursor(state),
@@ -136,6 +140,10 @@ impl RenderModel {
 
     pub fn show_cursor(&self) -> bool {
         self.show_cursor
+    }
+
+    pub fn action_rows(&self, theme: &Theme, content_width: u16) -> Vec<RowSpec> {
+        action_rows(&self.action_states, theme, content_width)
     }
 }
 
@@ -286,12 +294,8 @@ fn input_rows(state: &DashboardState, theme: &Theme) -> Vec<RowSpec> {
     rows
 }
 
-fn action_rows(state: &DashboardState, theme: &Theme) -> Vec<RowSpec> {
-    let action_states = action_states(state);
-    let button_widths = action_states
-        .iter()
-        .map(|action_state| button_width(action_state.action))
-        .collect::<Vec<_>>();
+fn action_rows(action_states: &[ActionState], theme: &Theme, content_width: u16) -> Vec<RowSpec> {
+    let geometry = action_button_geometry(action_states.len(), content_width as usize);
 
     let mut top = Vec::new();
     let mut middle = Vec::new();
@@ -300,7 +304,7 @@ fn action_rows(state: &DashboardState, theme: &Theme) -> Vec<RowSpec> {
     for (index, action_state) in action_states.iter().enumerate() {
         if index > 0 {
             let spacer = StyledRun::new(
-                " ".repeat(BUTTON_SPACING),
+                " ".repeat(geometry.spacing),
                 Style::default().bg(theme.panel_bg),
             );
             top.push(spacer.clone());
@@ -308,19 +312,9 @@ fn action_rows(state: &DashboardState, theme: &Theme) -> Vec<RowSpec> {
             bottom.push(spacer);
         }
 
-        top.push(action_cap_run(
-            action_state,
-            theme,
-            '▄',
-            button_widths[index],
-        ));
-        middle.push(action_label_run(action_state, theme, button_widths[index]));
-        bottom.push(action_cap_run(
-            action_state,
-            theme,
-            '▀',
-            button_widths[index],
-        ));
+        top.push(action_cap_run(action_state, theme, '▄', geometry.width));
+        middle.push(action_label_run(action_state, theme, geometry.width));
+        bottom.push(action_cap_run(action_state, theme, '▀', geometry.width));
     }
 
     vec![
@@ -536,12 +530,17 @@ fn session_content_width(state: &DashboardState, widths: &ColumnWidths) -> u16 {
 
 fn actions_content_width() -> u16 {
     let count = DashboardAction::DISPLAY_ORDER.len();
-    let button_widths = DashboardAction::DISPLAY_ORDER
+    let min_width = DashboardAction::DISPLAY_ORDER
         .iter()
-        .map(|action| button_width(*action))
-        .sum::<usize>();
-    let spacing = BUTTON_SPACING * count.saturating_sub(1);
-    (button_widths + spacing) as u16
+        .map(|action| display_width(action.label()))
+        .max()
+        .unwrap_or(BUTTON_MIN_WIDTH)
+        .max(BUTTON_MIN_WIDTH);
+    let geometry = action_button_geometry(
+        count,
+        (min_width * count) + (BUTTON_SPACING * count.saturating_sub(1)),
+    );
+    (geometry.width * count + geometry.spacing * count.saturating_sub(1)) as u16
 }
 
 fn column_widths(state: &DashboardState) -> ColumnWidths {
@@ -763,11 +762,6 @@ fn should_show_cursor(state: &DashboardState) -> bool {
         || (matches!(state.input_mode, InputMode::Filter) && !state.input_text.is_empty())
 }
 
-fn button_width(action: DashboardAction) -> usize {
-    (display_width(action.label()) + BUTTON_LEFT_PADDING + BUTTON_RIGHT_PADDING)
-        .max(BUTTON_MIN_WIDTH)
-}
-
 fn centered_text(label: &str, width: usize) -> String {
     let text_width = display_width(label);
     let total_padding = width.saturating_sub(text_width);
@@ -799,4 +793,14 @@ fn clip_text_to_width(text: &str, max_width: usize) -> String {
 
 fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
+}
+
+fn action_button_geometry(button_count: usize, available_width: usize) -> ActionButtonGeometry {
+    let spacing = BUTTON_SPACING;
+    let gutter_width = spacing * button_count.saturating_sub(1);
+    let min_total_width = (BUTTON_MIN_WIDTH * button_count) + gutter_width;
+    let usable_width = available_width.max(min_total_width);
+    let width = usable_width.saturating_sub(gutter_width) / button_count.max(1);
+
+    ActionButtonGeometry { width, spacing }
 }

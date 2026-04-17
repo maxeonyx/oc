@@ -70,7 +70,7 @@ pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
         state.theme.panel_bg,
         state.theme.container_bg,
         &render_model
-            .action_rows
+            .action_rows(&state.theme, layout.actions.content.width)
             .iter()
             .map(|row| row.render(layout.actions.content.width))
             .collect::<Vec<_>>(),
