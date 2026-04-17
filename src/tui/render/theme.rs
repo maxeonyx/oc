@@ -9,7 +9,7 @@ use terminal_colorsaurus::{
 
 const COLOR_QUERY_TIMEOUT: Duration = Duration::from_millis(400);
 const MIN_PANEL_CONTRAST: f32 = 1.18;
-const MIN_BUTTON_CONTRAST: f32 = 1.12;
+const MIN_BUTTON_CONTRAST: f32 = 1.08;
 const MIN_SELECTION_CONTRAST: f32 = 1.35;
 const MIN_MUTED_CONTRAST: f32 = 2.4;
 const MIN_DISABLED_CONTRAST: f32 = 1.8;
@@ -80,17 +80,20 @@ pub fn detect_theme() -> Theme {
 
 fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> Theme {
     let container_bg = derive_surface(background, mode, 0.08, 0.55, MIN_PANEL_CONTRAST);
-    let panel_bg = derive_nested_surface(container_bg, mode, 0.05, 0.75, MIN_BUTTON_CONTRAST);
-    let button_bg = derive_nested_surface(panel_bg, mode, 0.05, 0.75, MIN_BUTTON_CONTRAST);
-    let disabled_button_bg = mix(panel_bg, button_bg, 0.35);
+    let panel_bg = derive_nested_surface(container_bg, mode, 0.05, 0.75, 1.12);
+    let button_bg = derive_nested_surface(panel_bg, mode, 0.035, 0.75, MIN_BUTTON_CONTRAST);
+    let disabled_button_bg = mix(panel_bg, button_bg, 0.22);
     let selection_bg = derive_surface(background, mode, 0.18, 0.7, MIN_SELECTION_CONTRAST);
     let muted_text = derive_subdued_text(panel_bg, foreground, MIN_MUTED_CONTRAST, 0.48);
     let group_header_text = derive_subdued_text(panel_bg, foreground, 1.18, 0.14);
     let disabled_text = derive_subdued_text(button_bg, foreground, MIN_DISABLED_CONTRAST, 0.28);
     let selection_text = best_text_color(selection_bg, foreground, background);
-    let (action_attach_bg, action_attach_text) = semantic_action_pair(4, foreground, background);
-    let (action_remove_bg, action_remove_text) = semantic_action_pair(1, foreground, background);
-    let (action_caution_bg, action_caution_text) = semantic_action_pair(3, foreground, background);
+    let (action_attach_bg, action_attach_text) =
+        semantic_action_pair(4, button_bg, foreground, background);
+    let (action_remove_bg, action_remove_text) =
+        semantic_action_pair(1, button_bg, foreground, background);
+    let (action_caution_bg, action_caution_text) =
+        semantic_action_pair(3, button_bg, foreground, background);
 
     Theme {
         outer_bg: Color::Reset,
@@ -120,8 +123,13 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
     }
 }
 
-fn semantic_action_pair(index: u8, foreground: RgbColor, background: RgbColor) -> (Color, Color) {
-    let action_bg = ansi_index_rgb(index);
+fn semantic_action_pair(
+    index: u8,
+    button_bg: RgbColor,
+    foreground: RgbColor,
+    background: RgbColor,
+) -> (Color, Color) {
+    let action_bg = mix(button_bg, ansi_index_rgb(index), 0.45);
     (
         action_bg.into(),
         best_text_color(action_bg, foreground, background).into(),
