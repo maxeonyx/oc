@@ -85,6 +85,7 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
     let disabled_button_bg = mix(panel_bg, button_bg, 0.35);
     let selection_bg = derive_surface(background, mode, 0.18, 0.7, MIN_SELECTION_CONTRAST);
     let muted_text = derive_subdued_text(panel_bg, foreground, MIN_MUTED_CONTRAST, 0.48);
+    let group_header_text = derive_subdued_text(panel_bg, foreground, 1.18, 0.14);
     let disabled_text = derive_subdued_text(button_bg, foreground, MIN_DISABLED_CONTRAST, 0.28);
     let selection_text = best_text_color(selection_bg, foreground, background);
     let (action_attach_bg, action_attach_text) = semantic_action_pair(4, foreground, background);
@@ -97,7 +98,7 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
         panel_bg: panel_bg.into(),
         panel_text: foreground.into(),
         muted_text: muted_text.into(),
-        group_header_text: muted_text.into(),
+        group_header_text: group_header_text.into(),
         totals_text: Color::Indexed(6),
         accent: Color::Indexed(6),
         success: Color::Indexed(2),

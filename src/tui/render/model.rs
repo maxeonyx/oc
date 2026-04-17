@@ -114,7 +114,12 @@ pub fn expansion_candidate_metrics(state: &DashboardState) -> HorizontalMetrics 
 impl RenderModel {
     pub fn from_state(state: &DashboardState, metrics: HorizontalMetrics) -> Self {
         let column_widths = metrics.column_widths;
-        let session_table = SessionTable::from_state(state, &column_widths, &state.theme);
+        let session_table = SessionTable::from_state(
+            state,
+            &column_widths,
+            metrics.content_width as usize,
+            &state.theme,
+        );
 
         Self {
             summary_row: summary_row(state, &state.theme),
@@ -148,8 +153,13 @@ impl RenderModel {
 }
 
 impl SessionTable {
-    fn from_state(state: &DashboardState, widths: &ColumnWidths, theme: &Theme) -> Self {
-        let all_rows = session_rows(state, widths, theme);
+    fn from_state(
+        state: &DashboardState,
+        widths: &ColumnWidths,
+        content_width: usize,
+        theme: &Theme,
+    ) -> Self {
+        let all_rows = session_rows(state, widths, content_width, theme);
         let footer_start = all_rows.len().saturating_sub(SESSION_FOOTER_LINES);
         let body_line_count = footer_start.saturating_sub(1);
         let selected_body_index = selected_body_line_index(state);
@@ -632,9 +642,13 @@ fn frozen_list_content_height(session_count: usize) -> u16 {
     session_list_content_height(session_count).saturating_add(MAX_GROUP_HEADER_LINES as u16)
 }
 
-fn session_rows(state: &DashboardState, widths: &ColumnWidths, theme: &Theme) -> Vec<RowSpec> {
+fn session_rows(
+    state: &DashboardState,
+    widths: &ColumnWidths,
+    content_width: usize,
+    theme: &Theme,
+) -> Vec<RowSpec> {
     let header_text = format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", widths);
-    let header_width = display_width(&header_text);
     let mut rows = vec![RowSpec::single(
         header_text,
         Style::default()
@@ -651,7 +665,7 @@ fn session_rows(state: &DashboardState, widths: &ColumnWidths, theme: &Theme) ->
             widths,
             state.selected_index,
             &mut session_index,
-            header_width,
+            content_width,
             theme,
         );
     }
@@ -680,12 +694,12 @@ fn append_group_rows(
     widths: &ColumnWidths,
     selected_index: usize,
     session_index: &mut usize,
-    header_width: usize,
+    content_width: usize,
     theme: &Theme,
 ) {
     if let Some(title) = &group.title {
         rows.push(RowSpec::single(
-            centered_rule(title, header_width, '─'),
+            centered_rule(title, content_width, '─'),
             Style::default()
                 .fg(theme.group_header_text)
                 .bg(theme.panel_bg)
