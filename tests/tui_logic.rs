@@ -89,7 +89,7 @@ fn empty_filter_shows_sessions_when_no_directory_match() {
 }
 
 #[test]
-fn empty_filter_keeps_status_then_id_order_even_with_directory_match() {
+fn empty_filter_places_directory_matches_first() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![
         session_entry(1, "alpha", "/work/alpha", None, SessionStatus::Saved),
         session_entry(2, "beta", "/tmp/beta", None, SessionStatus::RunningAttached),
