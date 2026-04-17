@@ -81,7 +81,7 @@ impl DashboardSnapshot {
             filtered_memory_bytes: 0,
         };
 
-        let rows = entries
+        let mut rows = entries
             .into_iter()
             .map(|entry| {
                 match entry.status {
@@ -92,7 +92,9 @@ impl DashboardSnapshot {
 
                 DashboardRow::from_session_entry(entry)
             })
-            .collect();
+            .collect::<Vec<_>>();
+
+        rows.sort_by_key(|row| (status_rank(row.status), row.session_id));
 
         Self { rows, summary }
     }
@@ -169,5 +171,53 @@ impl DashboardAction {
 impl DashboardView {
     pub fn sessions(&self) -> impl Iterator<Item = &DashboardRow> {
         self.groups.iter().flat_map(|group| group.sessions.iter())
+    }
+}
+
+fn status_rank(status: SessionStatus) -> u8 {
+    match status {
+        SessionStatus::RunningAttached => 0,
+        SessionStatus::RunningDetached => 1,
+        SessionStatus::Saved => 2,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::session::{SavedSession, SessionListEntry};
+
+    use super::*;
+
+    #[test]
+    fn snapshot_rows_sort_by_status_then_id() {
+        let rows = DashboardSnapshot::from_session_entries(vec![
+            entry(4, SessionStatus::Saved),
+            entry(3, SessionStatus::RunningDetached),
+            entry(2, SessionStatus::RunningAttached),
+            entry(1, SessionStatus::RunningDetached),
+            entry(5, SessionStatus::RunningAttached),
+        ])
+        .rows;
+
+        assert_eq!(
+            rows.iter().map(|row| row.session_id).collect::<Vec<_>>(),
+            vec![2, 5, 1, 3, 4]
+        );
+    }
+
+    fn entry(id: i64, status: SessionStatus) -> SessionListEntry {
+        SessionListEntry {
+            saved_session: SavedSession {
+                id,
+                name: format!("session-{id}"),
+                directory: PathBuf::from(format!("/tmp/session-{id}")),
+                opencode_session_id: None,
+                opencode_args: Vec::new(),
+            },
+            status,
+            runtime: None,
+        }
     }
 }
