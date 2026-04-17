@@ -1,6 +1,6 @@
 use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
-use oc::tui::command::{parse_command, CommandParseError};
+use oc::tui::command::{CommandParseError, parse_command};
 use oc::tui::filter::{build_view, summary_for_view, totals_for_rows, totals_scope_label};
 use oc::tui::format::abbreviate_directory;
 use oc::tui::selection::{
@@ -441,10 +441,14 @@ fn persistent_action_auto_advances_and_cycles_skip_unavailable_actions() {
     );
     assert_eq!(
         cycle_action_for_row(saved_row, DashboardAction::Remove, 1),
-        DashboardAction::Attach
+        DashboardAction::Remove
     );
     assert_eq!(
         cycle_action_for_row(saved_row, DashboardAction::Remove, -1),
+        DashboardAction::Attach
+    );
+    assert_eq!(
+        cycle_action_for_row(saved_row, DashboardAction::Attach, -1),
         DashboardAction::Attach
     );
 }

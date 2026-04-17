@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use crate::session::SessionStatus;
 
 use super::theme::Theme;
-use crate::tui::format::{centered_rule, format_column_row, format_memory, ColumnWidths};
+use crate::tui::format::{ColumnWidths, centered_rule, format_column_row, format_memory};
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
     ActionState, CursorPosition, DashboardAction, DashboardGroup, DashboardRow, DashboardSnapshot,
@@ -15,7 +15,7 @@ use crate::tui::types::{
 };
 
 const MIN_CONTENT_WIDTH: u16 = 40;
-const MAX_GROUP_HEADER_LINES: usize = 4;
+const RESERVED_GROUP_SLOT_LINES: usize = 4;
 const SESSION_FOOTER_LINES: usize = 2;
 const SESSION_HEADER_LINES: usize = 1;
 const BUTTON_MIN_WIDTH: usize = 8;
@@ -37,29 +37,6 @@ pub struct DashboardMetrics {
 struct ActionButtonGeometry {
     width: usize,
     spacing: usize,
-}
-
-impl HorizontalMetrics {
-    pub fn expanded_with(self, other: Self) -> Self {
-        Self {
-            column_widths: ColumnWidths {
-                id: self.column_widths.id.max(other.column_widths.id),
-                name: self.column_widths.name.max(other.column_widths.name),
-                status: self.column_widths.status.max(other.column_widths.status),
-                memory: self.column_widths.memory.max(other.column_widths.memory),
-            },
-            content_width: self.content_width.max(other.content_width),
-        }
-    }
-}
-
-impl DashboardMetrics {
-    pub fn expanded_with(self, other: Self) -> Self {
-        Self {
-            horizontal: self.horizontal.expanded_with(other.horizontal),
-            list_content_height: self.list_content_height.max(other.list_content_height),
-        }
-    }
 }
 
 pub struct RenderModel {
@@ -89,27 +66,10 @@ struct StyledRun {
     style: Style,
 }
 
-pub fn horizontal_metrics(state: &DashboardState) -> HorizontalMetrics {
-    let widths = column_widths(state);
-    let content_width = content_width(state, &widths).max(MIN_CONTENT_WIDTH);
-
-    HorizontalMetrics {
-        column_widths: widths,
-        content_width,
-    }
-}
-
 pub fn dashboard_metrics(state: &DashboardState) -> DashboardMetrics {
     DashboardMetrics {
-        horizontal: horizontal_metrics(state),
-        list_content_height: session_list_content_height(state.view.sessions().count()),
-    }
-}
-
-pub fn frozen_dashboard_metrics(snapshot: &DashboardSnapshot) -> DashboardMetrics {
-    DashboardMetrics {
-        horizontal: unfiltered_horizontal_metrics(snapshot),
-        list_content_height: frozen_list_content_height(snapshot.rows.len()),
+        horizontal: unfiltered_horizontal_metrics(&state.snapshot),
+        list_content_height: stable_list_content_height(state.snapshot.rows.len()),
     }
 }
 
@@ -290,12 +250,10 @@ fn input_rows(state: &DashboardState, theme: &Theme) -> Vec<RowSpec> {
         ],
     )];
 
-    if let Some(status) = &state.status_message {
-        rows.push(RowSpec::single(
-            status.clone(),
-            Style::default().fg(theme.muted_text).bg(theme.panel_bg),
-        ));
-    }
+    rows.push(RowSpec::single(
+        state.status_message.clone().unwrap_or_default(),
+        Style::default().fg(theme.muted_text).bg(theme.panel_bg),
+    ));
 
     rows
 }
@@ -433,25 +391,6 @@ fn unfiltered_horizontal_metrics(snapshot: &DashboardSnapshot) -> HorizontalMetr
     }
 }
 
-fn content_width(state: &DashboardState, widths: &ColumnWidths) -> u16 {
-    let summary_width = display_width(&format!(
-        "Attached {}  Detached {}  Saved {}",
-        state.summary().attached,
-        state.summary().detached,
-        state.summary().saved
-    )) as u16;
-    let session_width = session_content_width(state, widths);
-    let actions_width = actions_content_width();
-    let help_width = display_width(
-        "↑↓ select  ←→ action  Enter run  Space command  Esc clear/quit  Ctrl-D quit",
-    ) as u16;
-
-    [summary_width, session_width, actions_width, help_width]
-        .into_iter()
-        .max()
-        .unwrap_or(MIN_CONTENT_WIDTH)
-}
-
 fn unfiltered_content_width(snapshot: &DashboardSnapshot, widths: &ColumnWidths) -> u16 {
     let summary_width = display_width(&format!(
         "Attached {}  Detached {}  Saved {}",
@@ -469,49 +408,6 @@ fn unfiltered_content_width(snapshot: &DashboardSnapshot, widths: &ColumnWidths)
         .unwrap_or(MIN_CONTENT_WIDTH)
 }
 
-fn session_content_width(state: &DashboardState, widths: &ColumnWidths) -> u16 {
-    let header_width = display_width(&format_column_row(
-        "ID",
-        "NAME",
-        "STATUS",
-        "MEMORY",
-        "DIRECTORY",
-        widths,
-    )) as u16;
-    let body_width = state
-        .view
-        .groups
-        .iter()
-        .flat_map(|group| {
-            let group_title = group.title.as_ref().map(|title| {
-                display_width(&centered_rule(title, header_width as usize, '─')) as u16
-            });
-            let rows = group.sessions.iter().map(|row| {
-                display_width(&format_column_row(
-                    &row.session_id.to_string(),
-                    &row.name,
-                    row.status_label(),
-                    &row.memory_label(),
-                    &row.directory,
-                    widths,
-                )) as u16
-            });
-            group_title.into_iter().chain(rows)
-        })
-        .max()
-        .unwrap_or(header_width);
-    let totals_width = display_width(&format_column_row(
-        &state.view.totals.filtered_sessions.to_string(),
-        "total sessions",
-        &state.view.totals.filtered_running.to_string(),
-        &format_memory(state.view.totals.filtered_memory_bytes),
-        state.totals_scope_label(),
-        widths,
-    )) as u16;
-
-    header_width.max(body_width).max(totals_width)
-}
-
 fn actions_content_width() -> u16 {
     let count = DashboardAction::DISPLAY_ORDER.len();
     let min_width = DashboardAction::DISPLAY_ORDER
@@ -525,10 +421,6 @@ fn actions_content_width() -> u16 {
         (min_width * count) + (BUTTON_SPACING * count.saturating_sub(1)),
     );
     (geometry.width * count + geometry.spacing * count.saturating_sub(1)) as u16
-}
-
-fn column_widths(state: &DashboardState) -> ColumnWidths {
-    column_widths_for_rows(state.view.sessions(), &state.view.totals)
 }
 
 fn column_widths_for_rows<'a>(
@@ -612,8 +504,8 @@ fn session_list_content_height(session_count: usize) -> u16 {
     (SESSION_HEADER_LINES + session_count + SESSION_FOOTER_LINES) as u16
 }
 
-fn frozen_list_content_height(session_count: usize) -> u16 {
-    session_list_content_height(session_count).saturating_add(MAX_GROUP_HEADER_LINES as u16)
+fn stable_list_content_height(session_count: usize) -> u16 {
+    session_list_content_height(session_count).saturating_add(RESERVED_GROUP_SLOT_LINES as u16)
 }
 
 fn session_rows(
@@ -631,18 +523,30 @@ fn session_rows(
             .add_modifier(Modifier::BOLD),
     )];
 
+    let session_count = state.view.sessions().count();
+    let mut body_rows = Vec::with_capacity(session_count + RESERVED_GROUP_SLOT_LINES);
     let mut session_index = 0;
+    let mut group_slots = 0;
+
     for group in &state.view.groups {
         append_group_rows(
-            &mut rows,
+            &mut body_rows,
             group,
             widths,
             state.selected_index,
             &mut session_index,
+            &mut group_slots,
             content_width,
             theme,
         );
     }
+
+    while group_slots < RESERVED_GROUP_SLOT_LINES {
+        body_rows.push(RowSpec::single("", Style::default().bg(theme.panel_bg)));
+        group_slots += 1;
+    }
+
+    rows.extend(body_rows);
 
     rows.push(RowSpec::single("", Style::default().bg(theme.panel_bg)));
     rows.push(RowSpec::single(
@@ -668,6 +572,7 @@ fn append_group_rows(
     widths: &ColumnWidths,
     selected_index: usize,
     session_index: &mut usize,
+    group_slots: &mut usize,
     content_width: usize,
     theme: &Theme,
 ) {
@@ -679,6 +584,7 @@ fn append_group_rows(
                 .bg(theme.panel_bg)
                 .add_modifier(Modifier::DIM),
         ));
+        *group_slots += 1;
     }
 
     for row in &group.sessions {

@@ -4,7 +4,7 @@ use std::time::Duration;
 use palette::{FromColor, Hsl, Srgb};
 use ratatui::style::Color;
 use terminal_colorsaurus::{
-    color_palette, ColorPalette, QueryOptions, ThemeMode as DetectedThemeMode,
+    ColorPalette, QueryOptions, ThemeMode as DetectedThemeMode, color_palette,
 };
 
 const COLOR_QUERY_TIMEOUT: Duration = Duration::from_millis(400);
@@ -85,7 +85,7 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
     let disabled_button_bg = mix(panel_bg, button_bg, 0.22);
     let selection_bg = derive_surface(background, mode, 0.18, 0.7, MIN_SELECTION_CONTRAST);
     let muted_text = derive_subdued_text(panel_bg, foreground, MIN_MUTED_CONTRAST, 0.48);
-    let group_header_text = derive_subdued_text(panel_bg, foreground, 1.18, 0.14);
+    let group_header_text = derive_subdued_text(panel_bg, foreground, 1.05, 0.04);
     let disabled_text = derive_subdued_text(button_bg, foreground, MIN_DISABLED_CONTRAST, 0.28);
     let selection_text = best_text_color(selection_bg, foreground, background);
     let (action_attach_bg, action_attach_text) =

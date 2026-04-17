@@ -110,8 +110,8 @@ pub fn cycle_action_for_row(
         .iter()
         .position(|action| *action == current)
         .unwrap_or(0) as isize;
-    let len = actions.len() as isize;
-    actions[(current_index + delta).rem_euclid(len) as usize]
+    let next_index = (current_index + delta).clamp(0, actions.len().saturating_sub(1) as isize);
+    actions[next_index as usize]
 }
 
 pub fn available_actions(row: &DashboardRow) -> Vec<DashboardAction> {

@@ -18,7 +18,7 @@ use super::command::{parse_command, CommandParseError};
 use super::filter::{build_view, summary_for_view, totals_scope_label};
 use super::input::{map_key_event, InputIntent};
 use super::render;
-use super::render::{DashboardMetrics, Theme};
+use super::render::Theme;
 use super::selection::{
     available_actions, cycle_action_for_row, default_selected_identity,
     index_for_selected_identity, preferred_action_for_row, selected_identity_at, SelectedSession,
@@ -40,9 +40,7 @@ pub struct DashboardState {
     pub current_directory: Option<PathBuf>,
     pub theme: Theme,
     pending_restart: Option<PendingRestart>,
-    dashboard_metrics_lock: Option<DashboardMetrics>,
     selected_identity: Option<SelectedSession>,
-    last_filter_text: String,
 }
 
 struct PendingRestart {
@@ -61,7 +59,6 @@ pub fn run(service: &SessionService, status_message: Option<String>) -> Result<(
         String::new(),
         status_message,
         theme,
-        None,
     )?;
     let mut last_refresh = Instant::now();
 
@@ -107,9 +104,6 @@ fn handle_input(
         InputIntent::Backspace => state.handle_backspace(service)?,
         InputIntent::EnterCommandMode => state.enter_command_mode(),
         InputIntent::InsertChar(character) => {
-            if state.input_mode == InputMode::Filter && state.input_text.is_empty() {
-                state.begin_filter_lock();
-            }
             state.input_text.push(character);
             state.status_message = None;
             if state.input_mode == InputMode::Filter {
@@ -131,7 +125,6 @@ impl DashboardState {
         input_text: String,
         status_message: Option<String>,
         theme: Theme,
-        dashboard_metrics_lock: Option<DashboardMetrics>,
     ) -> Result<Self> {
         let current_directory = std::env::current_dir().ok();
         let snapshot = DashboardSnapshot::from_session_entries(service.list_dashboard_sessions()?);
@@ -157,9 +150,7 @@ impl DashboardState {
             current_directory,
             theme,
             pending_restart: None,
-            dashboard_metrics_lock,
             selected_identity,
-            last_filter_text: String::new(),
         };
 
         state.rebuild_view(false);
@@ -207,7 +198,6 @@ impl DashboardState {
 
     pub fn enter_command_mode(&mut self) {
         self.input_mode = InputMode::Command;
-        self.clear_filter_lock();
         if !self.input_text.ends_with(' ') {
             self.input_text.push(' ');
         }
@@ -221,14 +211,8 @@ impl DashboardState {
 
         if self.input_mode == InputMode::Command && !self.input_text.contains(' ') {
             self.input_mode = InputMode::Filter;
-            if !self.input_text.is_empty() {
-                self.begin_filter_lock();
-            }
             self.rebuild_view(true);
         } else if self.input_mode == InputMode::Filter {
-            if self.input_text.is_empty() {
-                self.clear_filter_lock();
-            }
             self.rebuild_view(true);
         }
 
@@ -266,37 +250,10 @@ impl DashboardState {
         totals_scope_label(self.input_mode, &self.input_text)
     }
 
-    pub fn effective_dashboard_metrics(&self) -> DashboardMetrics {
-        self.dashboard_metrics_lock
-            .unwrap_or_else(|| render::dashboard_metrics(self))
-    }
-
     fn reconcile_selected_action(&mut self) {
         if let Some(row) = self.selected_row() {
             self.selected_action = preferred_action_for_row(row, self.selected_action);
         }
-    }
-
-    fn begin_filter_lock(&mut self) {
-        self.dashboard_metrics_lock = Some(render::frozen_dashboard_metrics(&self.snapshot));
-    }
-
-    fn clear_filter_lock(&mut self) {
-        self.dashboard_metrics_lock = None;
-    }
-
-    fn update_filter_lock(&mut self) {
-        if !self.has_active_filter() {
-            self.clear_filter_lock();
-            return;
-        }
-
-        let expansion = render::dashboard_metrics(self);
-        self.dashboard_metrics_lock = Some(
-            self.dashboard_metrics_lock
-                .unwrap_or(expansion)
-                .expanded_with(expansion),
-        );
     }
 
     fn has_active_filter(&self) -> bool {
@@ -316,7 +273,6 @@ impl DashboardState {
                     String::new(),
                     None,
                     self.theme,
-                    None,
                 )?;
             }
             Err(error) => self.status_message = Some(format_command_error(error)),
@@ -341,11 +297,9 @@ impl DashboardState {
     }
 
     fn clear_input(&mut self, service: &SessionService) -> Result<()> {
-        self.last_filter_text = self.input_text.clone();
         self.input_text.clear();
         self.input_mode = InputMode::Filter;
         self.status_message = None;
-        self.clear_filter_lock();
         self.rebuild_view(true);
         self.refresh(service)
     }
@@ -355,11 +309,9 @@ impl DashboardState {
             return Ok(true);
         }
 
-        self.last_filter_text = self.input_text.clone();
         self.input_text.clear();
         self.input_mode = InputMode::Filter;
         self.status_message = None;
-        self.clear_filter_lock();
         self.rebuild_view(true);
         self.refresh(service)?;
         Ok(false)
@@ -374,8 +326,6 @@ impl DashboardState {
         );
         self.reconcile_selection(filter_text_changed);
         self.reconcile_selected_action();
-        self.update_filter_lock();
-        self.last_filter_text = self.input_text.clone();
     }
 
     fn reconcile_selection(&mut self, filter_text_changed: bool) {
