@@ -112,7 +112,9 @@ No single-letter hotkeys — they conflict with type-to-filter. For example, `q`
 
 ### Action bar
 
-All available actions are shown as **separate items** in the action bar, ordered by frequency of use: **Attach, RM, Stop, Restart**. Left/right moves a **highlight** across them to select which action Enter will execute. Unavailable actions are shown **grayed out**, not hidden — so the layout is stable and the user always knows what exists. Left/right skips unavailable actions. The highlight itself communicates which action is active — no separate "Enter" label (the key help line already says `Enter run`). Action buttons should have clean padding/spacing.
+All available actions are shown as **separate items** in the action bar, ordered by frequency of use: **Attach, RM, Stop, Restart**. Left/right moves a **highlight** across them to select which action Enter will execute. Unavailable actions are shown **grayed out**, not hidden — so the layout is stable and the user always knows what exists. Left/right skips unavailable actions. The highlight itself communicates which action is active — no separate "Enter" label (the key help line already says `Enter run`).
+
+**Action button layout:** Buttons are laid out as a single horizontal group that shares the panel width equally. The action panel has 2-column horizontal padding. The remaining width is divided evenly across all buttons, with fixed gutters between adjacent buttons. Buttons do not shrink-wrap to their label width — all buttons are the same rendered width. When a button is selected/highlighted, it uses a semantic color reflecting the action's nature: Attach = green/blue (positive), RM = red (destructive), Stop = yellow (caution), Restart = yellow (caution). Non-selected active buttons stay neutral. Disabled buttons are grayed out.
 
 **Action availability by session status:**
 - **Attached:** Attach (reattach/focus), RM (remove alias + kill), Stop (graceful shutdown, keep alias), Restart (only with saved OpenCode session ID)
@@ -194,7 +196,7 @@ The TUI should feel like it belongs alongside OpenCode in the same terminal — 
 
 **Layout:** The dashboard is **centered in the terminal** and **sized to its content** — it should not fill the entire window. It expands as needed (more sessions → taller), but there's no empty space within the dashboard area. Totals are always visible right below the last session row. When the session list exceeds the terminal height, the list scrolls and totals remain sticky at the bottom of the session area.
 
-**Layout stability during filtering:** When the user starts typing a filter (transition from empty to non-empty filter text), the horizontal layout dimensions — column widths, total content width — lock to the current unfiltered data. Filter edits never cause horizontal resizing; the user's spatial memory is preserved. Vertical dimensions (row count, panel height) stay live and follow the filtered results — fewer matches make the panel shorter, which is expected. Background data changes while filtering can *expand* the locked horizontal dimensions (if a newly visible row needs more width) but never *shrink* them — shrinking is deferred until the filter is cleared. Clearing the filter (Esc, Ctrl-C, backspace to empty) discards the lock and recomputes fresh from current full data. Terminal resize always adapts regardless of filter state.
+**Interface stability:** The dashboard's outer dimensions (width AND height) are computed from the unfiltered data and do not change while filtering. Height pre-reserves space for the worst-case filter grouping overhead (4 group-header rows: ID, Name, Directory, Session ID) so that group headers appearing during filtering never grow the dashboard. Applying or clearing a filter changes which rows are populated, but never changes the dashboard's outer dimensions. Background data changes can expand (never shrink) the frozen dimensions. Clearing the filter recomputes fresh from current data. Terminal resize always adapts.
 
 **Layout order (top to bottom):**
 1. Input/filter bar
@@ -205,11 +207,11 @@ The TUI should feel like it belongs alongside OpenCode in the same terminal — 
 
 **Borders and styling:** Panels are separated by **background color** — the terminal background is one color, and foreground panels are a different color. No line-drawing border characters (─│┌┐). Half-block characters (▀▄) create clean transitions between panel and terminal background on **both the top and bottom edges** of each panel. See OpenCode's own TUI for the exact pattern.
 
-**Padding:** Tight and purposeful. The filter bar and action bar should have minimal vertical padding — just enough to read clearly, not enough to feel spacious. The tool should feel compact.
+**Padding:** Tight and purposeful. Padding should be visually consistent — if vertical padding is a half-block (one row), horizontal padding should be two columns (since terminal cells are ~1:2 aspect ratio). The tool should feel compact.
 
 **Information hierarchy:** Important information should be prominent; less important information should be subdued. Specifically:
 - Column headers should be clearly styled
-- Group headers (when filtering) should be **full-width** and **grayed out** — present but innocuous
+- Group headers (when filtering) are **structural separators, not content**. Their color is derived from the **panel background** shifted only slightly toward the text color — visually much closer to the background than to content text. They should be barely noticeable. Full-width, centered text with a horizontal rule line at the same color.
 - Totals row should be visually distinct from sessions but within the same panel
 - The input bar should have a visible cursor
 
