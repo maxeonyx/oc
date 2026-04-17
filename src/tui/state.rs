@@ -18,7 +18,7 @@ use super::command::{parse_command, CommandParseError};
 use super::filter::{build_view, summary_for_view, totals_scope_label};
 use super::input::{map_key_event, InputIntent};
 use super::render;
-use super::render::{HorizontalMetrics, Theme};
+use super::render::{DashboardMetrics, Theme};
 use super::selection::{
     available_actions, cycle_action_for_row, default_selected_identity,
     index_for_selected_identity, preferred_action_for_row, selected_identity_at, SelectedSession,
@@ -40,7 +40,7 @@ pub struct DashboardState {
     pub current_directory: Option<PathBuf>,
     pub theme: Theme,
     pending_restart: Option<PendingRestart>,
-    horizontal_metrics_lock: Option<HorizontalMetrics>,
+    dashboard_metrics_lock: Option<DashboardMetrics>,
     selected_identity: Option<SelectedSession>,
     last_filter_text: String,
 }
@@ -131,7 +131,7 @@ impl DashboardState {
         input_text: String,
         status_message: Option<String>,
         theme: Theme,
-        horizontal_metrics_lock: Option<HorizontalMetrics>,
+        dashboard_metrics_lock: Option<DashboardMetrics>,
     ) -> Result<Self> {
         let current_directory = std::env::current_dir().ok();
         let snapshot = DashboardSnapshot::from_session_entries(service.list_dashboard_sessions()?);
@@ -157,7 +157,7 @@ impl DashboardState {
             current_directory,
             theme,
             pending_restart: None,
-            horizontal_metrics_lock,
+            dashboard_metrics_lock,
             selected_identity,
             last_filter_text: String::new(),
         };
@@ -266,9 +266,9 @@ impl DashboardState {
         totals_scope_label(self.input_mode, &self.input_text)
     }
 
-    pub fn effective_horizontal_metrics(&self) -> HorizontalMetrics {
-        self.horizontal_metrics_lock
-            .unwrap_or_else(|| render::horizontal_metrics(self))
+    pub fn effective_dashboard_metrics(&self) -> DashboardMetrics {
+        self.dashboard_metrics_lock
+            .unwrap_or_else(|| render::dashboard_metrics(self))
     }
 
     fn reconcile_selected_action(&mut self) {
@@ -278,11 +278,11 @@ impl DashboardState {
     }
 
     fn begin_filter_lock(&mut self) {
-        self.horizontal_metrics_lock = Some(render::horizontal_metrics(self));
+        self.dashboard_metrics_lock = Some(render::frozen_dashboard_metrics(&self.snapshot));
     }
 
     fn clear_filter_lock(&mut self) {
-        self.horizontal_metrics_lock = None;
+        self.dashboard_metrics_lock = None;
     }
 
     fn update_filter_lock(&mut self) {
@@ -291,9 +291,9 @@ impl DashboardState {
             return;
         }
 
-        let expansion = render::expansion_candidate_metrics(self);
-        self.horizontal_metrics_lock = Some(
-            self.horizontal_metrics_lock
+        let expansion = render::dashboard_metrics(self);
+        self.dashboard_metrics_lock = Some(
+            self.dashboard_metrics_lock
                 .unwrap_or(expansion)
                 .expanded_with(expansion),
         );

@@ -1,6 +1,6 @@
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 
-use super::model::RenderModel;
+use super::model::{DashboardMetrics, RenderModel};
 
 const CONTAINER_HORIZONTAL_PADDING: u16 = 2;
 const CONTAINER_EDGE_HEIGHT: u16 = 1;
@@ -15,23 +15,26 @@ const MIN_LIST_CONTENT_HEIGHT: u16 = 3;
 const MIN_OUTER_WIDTH: u16 = 40;
 const OUTER_HORIZONTAL_MARGIN: u16 = 2;
 
-pub fn compute_layout(area: Rect, render_model: &RenderModel) -> DashboardLayout {
+pub fn compute_layout(
+    area: Rect,
+    render_model: &RenderModel,
+    metrics: DashboardMetrics,
+) -> DashboardLayout {
     let input_content_height = render_model
         .input_content_height()
         .clamp(MIN_INPUT_CONTENT_HEIGHT, MAX_INPUT_CONTENT_HEIGHT);
     let non_list_height = non_list_panels_height(input_content_height);
-    let list_content_height = (render_model
-        .session_table
-        .line_count()
-        .max(MIN_LIST_CONTENT_HEIGHT as usize) as u16)
+    let list_content_height = metrics
+        .list_content_height
         .min(area.height.saturating_sub(non_list_height))
         .max(MIN_LIST_CONTENT_HEIGHT);
     let min_height = minimum_panel_height(input_content_height).min(area.height.max(1));
     let desired_height = non_list_height + panel_height(list_content_height);
     let outer_height = desired_height.min(area.height).max(min_height);
 
-    let desired_width = render_model
-        .content_width()
+    let desired_width = metrics
+        .horizontal
+        .content_width
         .saturating_add(PANEL_HORIZONTAL_PADDING * 2)
         .saturating_add(CONTAINER_HORIZONTAL_PADDING * 2);
     let max_width = area.width.saturating_sub(OUTER_HORIZONTAL_MARGIN);

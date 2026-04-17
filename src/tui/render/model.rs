@@ -10,10 +10,12 @@ use super::theme::Theme;
 use crate::tui::format::{centered_rule, format_column_row, format_memory, ColumnWidths};
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
-    ActionState, CursorPosition, DashboardAction, DashboardGroup, DashboardRow, InputMode,
+    ActionState, CursorPosition, DashboardAction, DashboardGroup, DashboardRow, DashboardSnapshot,
+    DashboardSummary, InputMode,
 };
 
 const MIN_CONTENT_WIDTH: u16 = 40;
+const MAX_GROUP_HEADER_LINES: usize = 4;
 const SESSION_FOOTER_LINES: usize = 2;
 const SESSION_HEADER_LINES: usize = 1;
 const BUTTON_MIN_WIDTH: usize = 8;
@@ -25,6 +27,12 @@ const BUTTON_SPACING: usize = 2;
 pub struct HorizontalMetrics {
     pub column_widths: ColumnWidths,
     pub content_width: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DashboardMetrics {
+    pub horizontal: HorizontalMetrics,
+    pub list_content_height: u16,
 }
 
 impl HorizontalMetrics {
@@ -41,13 +49,21 @@ impl HorizontalMetrics {
     }
 }
 
+impl DashboardMetrics {
+    pub fn expanded_with(self, other: Self) -> Self {
+        Self {
+            horizontal: self.horizontal.expanded_with(other.horizontal),
+            list_content_height: self.list_content_height.max(other.list_content_height),
+        }
+    }
+}
+
 pub struct RenderModel {
     pub summary_row: RowSpec,
     pub input_rows: Vec<RowSpec>,
     pub session_table: SessionTable,
     pub action_rows: Vec<RowSpec>,
     pub help_row: RowSpec,
-    content_width: u16,
     input_cursor_offset: u16,
     show_cursor: bool,
 }
@@ -73,6 +89,20 @@ pub fn horizontal_metrics(state: &DashboardState) -> HorizontalMetrics {
     horizontal_metrics_with_scope(state, MeasurementScope::FrozenLayout)
 }
 
+pub fn dashboard_metrics(state: &DashboardState) -> DashboardMetrics {
+    DashboardMetrics {
+        horizontal: horizontal_metrics(state),
+        list_content_height: session_list_content_height(state.view.sessions().count()),
+    }
+}
+
+pub fn frozen_dashboard_metrics(snapshot: &DashboardSnapshot) -> DashboardMetrics {
+    DashboardMetrics {
+        horizontal: unfiltered_horizontal_metrics(snapshot),
+        list_content_height: frozen_list_content_height(snapshot.rows.len()),
+    }
+}
+
 pub fn expansion_candidate_metrics(state: &DashboardState) -> HorizontalMetrics {
     horizontal_metrics_with_scope(state, MeasurementScope::ExpansionOnly)
 }
@@ -88,14 +118,9 @@ impl RenderModel {
             session_table,
             action_rows: action_rows(state, &state.theme),
             help_row: help_row(&state.theme),
-            content_width: metrics.content_width,
             input_cursor_offset: input_cursor_offset(state),
             show_cursor: should_show_cursor(state),
         }
-    }
-
-    pub fn content_width(&self) -> u16 {
-        self.content_width
     }
 
     pub fn input_content_height(&self) -> u16 {
@@ -125,10 +150,6 @@ impl SessionTable {
             body_scroll: selected_body_index.min(body_line_count.saturating_sub(1)),
             all_rows,
         }
-    }
-
-    pub fn line_count(&self) -> usize {
-        self.all_rows.len()
     }
 
     pub fn visible_lines(&self, width: u16, max_lines: usize) -> Vec<Line<'static>> {
@@ -414,6 +435,17 @@ fn horizontal_metrics_with_scope(
     }
 }
 
+fn unfiltered_horizontal_metrics(snapshot: &DashboardSnapshot) -> HorizontalMetrics {
+    let totals = summary_totals(snapshot);
+    let widths = column_widths_for_rows(snapshot.rows.iter(), &totals);
+    let content_width = unfiltered_content_width(snapshot, &widths).max(MIN_CONTENT_WIDTH);
+
+    HorizontalMetrics {
+        column_widths: widths,
+        content_width,
+    }
+}
+
 fn content_width_for_scope(
     state: &DashboardState,
     widths: &ColumnWidths,
@@ -440,6 +472,23 @@ fn content_width_for_scope(
         MeasurementScope::FrozenLayout => base_width,
         MeasurementScope::ExpansionOnly => base_width,
     }
+}
+
+fn unfiltered_content_width(snapshot: &DashboardSnapshot, widths: &ColumnWidths) -> u16 {
+    let summary_width = display_width(&format!(
+        "Attached {}  Detached {}  Saved {}",
+        snapshot.summary.attached, snapshot.summary.detached, snapshot.summary.saved
+    )) as u16;
+    let session_width = unfiltered_session_content_width(snapshot, widths);
+    let actions_width = actions_content_width();
+    let help_width = display_width(
+        "↑↓ select  ←→ action  Enter run  Space command  Esc clear/quit  Ctrl-D quit",
+    ) as u16;
+
+    [summary_width, session_width, actions_width, help_width]
+        .into_iter()
+        .max()
+        .unwrap_or(MIN_CONTENT_WIDTH)
 }
 
 fn session_content_width(state: &DashboardState, widths: &ColumnWidths) -> u16 {
@@ -496,7 +545,13 @@ fn actions_content_width() -> u16 {
 }
 
 fn column_widths(state: &DashboardState) -> ColumnWidths {
-    let totals = &state.view.totals;
+    column_widths_for_rows(state.view.sessions(), &state.view.totals)
+}
+
+fn column_widths_for_rows<'a>(
+    rows: impl IntoIterator<Item = &'a DashboardRow>,
+    totals: &DashboardSummary,
+) -> ColumnWidths {
     let mut widths = ColumnWidths {
         id: display_width("ID").max(display_width(&totals.filtered_sessions.to_string())),
         name: display_width("total sessions").max(display_width("NAME")),
@@ -508,7 +563,7 @@ fn column_widths(state: &DashboardState) -> ColumnWidths {
             .max(display_width("MEMORY")),
     };
 
-    for row in state.view.sessions() {
+    for row in rows {
         widths.id = widths.id.max(display_width(&row.session_id.to_string()));
         widths.name = widths.name.max(display_width(&row.name));
         widths.status = widths.status.max(display_width(row.status_label()));
@@ -516,6 +571,66 @@ fn column_widths(state: &DashboardState) -> ColumnWidths {
     }
 
     widths
+}
+
+fn summary_totals(snapshot: &DashboardSnapshot) -> DashboardSummary {
+    DashboardSummary {
+        attached: snapshot.summary.attached,
+        detached: snapshot.summary.detached,
+        saved: snapshot.summary.saved,
+        filtered_sessions: snapshot.rows.len(),
+        filtered_running: snapshot.summary.attached + snapshot.summary.detached,
+        filtered_memory_bytes: snapshot
+            .rows
+            .iter()
+            .map(|row| row.memory_bytes.unwrap_or(0))
+            .sum(),
+    }
+}
+
+fn unfiltered_session_content_width(snapshot: &DashboardSnapshot, widths: &ColumnWidths) -> u16 {
+    let totals = summary_totals(snapshot);
+    let header_width = display_width(&format_column_row(
+        "ID",
+        "NAME",
+        "STATUS",
+        "MEMORY",
+        "DIRECTORY",
+        widths,
+    )) as u16;
+    let body_width = snapshot
+        .rows
+        .iter()
+        .map(|row| {
+            display_width(&format_column_row(
+                &row.session_id.to_string(),
+                &row.name,
+                row.status_label(),
+                &row.memory_label(),
+                &row.directory,
+                widths,
+            )) as u16
+        })
+        .max()
+        .unwrap_or(header_width);
+    let totals_width = display_width(&format_column_row(
+        &totals.filtered_sessions.to_string(),
+        "total sessions",
+        &totals.filtered_running.to_string(),
+        &format_memory(totals.filtered_memory_bytes),
+        "all sessions",
+        widths,
+    )) as u16;
+
+    header_width.max(body_width).max(totals_width)
+}
+
+fn session_list_content_height(session_count: usize) -> u16 {
+    (SESSION_HEADER_LINES + session_count + SESSION_FOOTER_LINES) as u16
+}
+
+fn frozen_list_content_height(session_count: usize) -> u16 {
+    session_list_content_height(session_count).saturating_add(MAX_GROUP_HEADER_LINES as u16)
 }
 
 fn session_rows(state: &DashboardState, widths: &ColumnWidths, theme: &Theme) -> Vec<RowSpec> {

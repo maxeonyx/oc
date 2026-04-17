@@ -9,13 +9,16 @@ use super::state::DashboardState;
 use layout::{compute_layout, SurfaceLayout};
 use model::RenderModel;
 
-pub use model::{expansion_candidate_metrics, horizontal_metrics, HorizontalMetrics};
+pub use model::{
+    dashboard_metrics, expansion_candidate_metrics, frozen_dashboard_metrics, DashboardMetrics,
+    HorizontalMetrics,
+};
 pub use theme::{detect_theme, Theme};
 
 pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
-    let metrics = state.effective_horizontal_metrics();
-    let render_model = RenderModel::from_state(state, metrics);
-    let layout = compute_layout(frame.area(), &render_model);
+    let metrics = state.effective_dashboard_metrics();
+    let render_model = RenderModel::from_state(state, metrics.horizontal);
+    let layout = compute_layout(frame.area(), &render_model, metrics);
 
     frame.render_widget(Clear, frame.area());
     fill_rect(
