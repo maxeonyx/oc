@@ -95,27 +95,11 @@ pub fn summary_for_view(
 
 fn groups_without_filter(
     snapshot: &DashboardSnapshot,
-    current_directory: Option<&Path>,
+    _current_directory: Option<&Path>,
 ) -> Vec<DashboardGroup> {
-    let (matching_rows, remaining_rows) = match current_directory {
-        Some(current_directory) => snapshot
-            .rows
-            .iter()
-            .cloned()
-            .partition::<Vec<_>, _>(|row| row.full_directory == current_directory),
-        None => (Vec::new(), snapshot.rows.clone()),
-    };
-
-    if matching_rows.is_empty() {
-        return vec![DashboardGroup {
-            title: None,
-            sessions: remaining_rows,
-        }];
-    }
-
     vec![DashboardGroup {
         title: None,
-        sessions: matching_rows.into_iter().chain(remaining_rows).collect(),
+        sessions: snapshot.rows.clone(),
     }]
 }
 
@@ -159,7 +143,7 @@ fn append_group(
         return;
     }
 
-    matches.sort_by_key(|(strength, _)| *strength);
+    matches.sort_by_key(|(strength, row)| (*strength, row.session_id));
     groups.push(DashboardGroup {
         title: Some(String::from(group.title())),
         sessions: matches.into_iter().map(|(_, row)| row).collect(),

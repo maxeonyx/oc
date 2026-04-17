@@ -6,7 +6,7 @@ use ratatui::widgets::{Clear, Paragraph, Widget};
 use ratatui::{layout::Rect, style::Style, text::Line, Frame};
 
 use super::state::DashboardState;
-use layout::{compute_layout, ContainerLayout, PanelLayout};
+use layout::{compute_layout, SurfaceLayout};
 use model::RenderModel;
 
 pub use model::{expansion_candidate_metrics, horizontal_metrics, HorizontalMetrics};
@@ -23,49 +23,61 @@ pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
         frame.area(),
         Style::default().bg(state.theme.outer_bg),
     );
-    render_container(
+
+    render_surface(
         frame,
         layout.container,
         state.theme.container_bg,
         state.theme.outer_bg,
+        &[],
     );
-
-    render_panel(
+    render_surface(
         frame,
         layout.input,
-        &render_model.input_lines,
         state.theme.panel_bg,
-        state.theme.outer_bg,
+        state.theme.container_bg,
+        &render_model
+            .input_rows
+            .iter()
+            .map(|row| row.render(layout.input.content.width))
+            .collect::<Vec<_>>(),
     );
-    render_panel(
+    render_surface(
         frame,
         layout.summary,
-        std::slice::from_ref(&render_model.summary_line),
         state.theme.panel_bg,
-        state.theme.outer_bg,
+        state.theme.container_bg,
+        &[render_model
+            .summary_row
+            .render(layout.summary.content.width)],
     );
-    render_panel(
+    render_surface(
         frame,
         layout.list,
-        &render_model
-            .session_table
-            .visible_lines(layout.list.content.height as usize),
         state.theme.panel_bg,
-        state.theme.outer_bg,
+        state.theme.container_bg,
+        &render_model.session_table.visible_lines(
+            layout.list.content.width,
+            layout.list.content.height as usize,
+        ),
     );
-    render_panel(
+    render_surface(
         frame,
         layout.actions,
-        &render_model.action_lines,
         state.theme.panel_bg,
-        state.theme.outer_bg,
+        state.theme.container_bg,
+        &render_model
+            .action_rows
+            .iter()
+            .map(|row| row.render(layout.actions.content.width))
+            .collect::<Vec<_>>(),
     );
-    render_panel(
+    render_surface(
         frame,
         layout.help,
-        std::slice::from_ref(&render_model.help_line),
         state.theme.panel_bg,
-        state.theme.outer_bg,
+        state.theme.container_bg,
+        &[render_model.help_row.render(layout.help.content.width)],
     );
 
     if render_model.show_cursor() {
@@ -74,40 +86,35 @@ pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
     }
 }
 
-fn render_container(
+fn render_surface(
     frame: &mut Frame<'_>,
-    container: ContainerLayout,
-    container_bg: ratatui::style::Color,
-    outer_bg: ratatui::style::Color,
+    surface: SurfaceLayout,
+    bg: ratatui::style::Color,
+    parent_bg: ratatui::style::Color,
+    lines: &[Line<'static>],
 ) {
-    fill_rect(frame, container.content, Style::default().bg(container_bg));
-    render_edge(frame, container.top_edge, '▄', container_bg, outer_bg);
-    render_edge(frame, container.bottom_edge, '▀', container_bg, outer_bg);
+    fill_rect(frame, surface.interior, Style::default().bg(bg));
+    render_edge(frame, surface.top_edge, '▄', bg, parent_bg);
+    render_edge(frame, surface.bottom_edge, '▀', bg, parent_bg);
+    render_lines(frame, surface.content, lines, Style::default().bg(bg));
 }
 
-fn render_panel(
-    frame: &mut Frame<'_>,
-    panel: PanelLayout,
-    lines: &[Line<'static>],
-    panel_bg: ratatui::style::Color,
-    outer_bg: ratatui::style::Color,
-) {
-    let panel_background = Rect::new(
-        panel.top_edge.x,
-        panel.content.y,
-        panel.top_edge.width,
-        panel.content.height,
-    );
-    fill_rect(frame, panel_background, Style::default().bg(panel_bg));
-    render_edge(frame, panel.top_edge, '▄', panel_bg, outer_bg);
-    render_edge(frame, panel.bottom_edge, '▀', panel_bg, outer_bg);
-    Paragraph::new(lines.to_vec()).render(panel.content, frame.buffer_mut());
+fn render_lines(frame: &mut Frame<'_>, area: Rect, lines: &[Line<'static>], fill_style: Style) {
+    let line_count = area.height as usize;
+    for index in 0..line_count {
+        let row_area = Rect::new(area.x, area.y + index as u16, area.width, 1);
+        if let Some(line) = lines.get(index) {
+            Paragraph::new(line.clone()).render(row_area, frame.buffer_mut());
+        } else {
+            Paragraph::new(Line::styled(" ".repeat(area.width as usize), fill_style))
+                .render(row_area, frame.buffer_mut());
+        }
+    }
 }
 
 fn fill_rect(frame: &mut Frame<'_>, area: Rect, style: Style) {
     for y in area.top()..area.bottom() {
-        let line = " ".repeat(area.width as usize);
-        Paragraph::new(Line::styled(line, style))
+        Paragraph::new(Line::styled(" ".repeat(area.width as usize), style))
             .render(Rect::new(area.x, y, area.width, 1), frame.buffer_mut());
     }
 }

@@ -37,6 +37,38 @@ pub fn select_index_for_input(
     )
 }
 
+pub fn selected_identity_at(view: &DashboardView, index: usize) -> Option<SelectedSession> {
+    view.sessions()
+        .nth(index)
+        .map(|session| SelectedSession(session.session_id))
+}
+
+pub fn index_for_selected_identity(
+    view: &DashboardView,
+    selected_identity: Option<SelectedSession>,
+) -> Option<usize> {
+    let SelectedSession(session_id) = selected_identity?;
+    view.sessions()
+        .position(|session| session.session_id == session_id)
+}
+
+pub fn default_selected_identity(
+    view: &DashboardView,
+    current_directory: Option<&std::path::Path>,
+) -> Option<SelectedSession> {
+    if let Some(current_directory) = current_directory {
+        for session in view.sessions() {
+            if session.full_directory == current_directory {
+                return Some(SelectedSession(session.session_id));
+            }
+        }
+    }
+
+    view.sessions()
+        .next()
+        .map(|session| SelectedSession(session.session_id))
+}
+
 pub fn preferred_action_for_row(row: &DashboardRow, current: DashboardAction) -> DashboardAction {
     let available = available_actions(row);
     if available.is_empty() {
@@ -84,21 +116,4 @@ pub fn cycle_action_for_row(
 
 pub fn available_actions(row: &DashboardRow) -> Vec<DashboardAction> {
     row.available_actions()
-}
-
-fn default_selected_identity(
-    view: &DashboardView,
-    current_directory: Option<&std::path::Path>,
-) -> Option<SelectedSession> {
-    if let Some(current_directory) = current_directory {
-        for session in view.sessions() {
-            if session.full_directory == current_directory {
-                return Some(SelectedSession(session.session_id));
-            }
-        }
-    }
-
-    view.sessions()
-        .next()
-        .map(|session| SelectedSession(session.session_id))
 }

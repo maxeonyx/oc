@@ -20,8 +20,8 @@ use super::input::{map_key_event, InputIntent};
 use super::render;
 use super::render::{HorizontalMetrics, Theme};
 use super::selection::{
-    available_actions, cycle_action_for_row, preferred_action_for_row, select_index_for_input,
-    SelectedSession,
+    available_actions, cycle_action_for_row, default_selected_identity,
+    index_for_selected_identity, preferred_action_for_row, selected_identity_at, SelectedSession,
 };
 use super::types::{
     DashboardAction, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,
@@ -41,6 +41,8 @@ pub struct DashboardState {
     pub theme: Theme,
     pending_restart: Option<PendingRestart>,
     horizontal_metrics_lock: Option<HorizontalMetrics>,
+    selected_identity: Option<SelectedSession>,
+    last_filter_text: String,
 }
 
 struct PendingRestart {
@@ -111,7 +113,7 @@ fn handle_input(
             state.input_text.push(character);
             state.status_message = None;
             if state.input_mode == InputMode::Filter {
-                state.refresh(service)?;
+                state.rebuild_view(true);
             }
         }
         InputIntent::Ignore => {}
@@ -133,24 +135,21 @@ impl DashboardState {
     ) -> Result<Self> {
         let current_directory = std::env::current_dir().ok();
         let snapshot = DashboardSnapshot::from_session_entries(service.list_dashboard_sessions()?);
-        let view = build_view(
-            &snapshot,
-            &input_text,
-            input_mode,
-            current_directory.clone(),
-        );
-        let selected_index = select_index_for_input(
-            &view,
-            selected_identity,
-            current_directory.as_deref(),
-            input_mode,
-            &input_text,
-        );
 
         let mut state = Self {
             snapshot,
-            view,
-            selected_index,
+            view: DashboardView {
+                groups: Vec::new(),
+                totals: DashboardSummary {
+                    attached: 0,
+                    detached: 0,
+                    saved: 0,
+                    filtered_sessions: 0,
+                    filtered_running: 0,
+                    filtered_memory_bytes: 0,
+                },
+            },
+            selected_index: 0,
             selected_action: preferred_action,
             input_mode,
             input_text,
@@ -159,28 +158,20 @@ impl DashboardState {
             theme,
             pending_restart: None,
             horizontal_metrics_lock,
+            selected_identity,
+            last_filter_text: String::new(),
         };
 
-        state.reconcile_selected_action();
-        state.update_filter_lock();
+        state.rebuild_view(false);
         Ok(state)
     }
 
     fn refresh(&mut self, service: &SessionService) -> Result<()> {
-        let selected_identity = self.selected_session();
-        let preferred_action = self.selected_action;
-        let pending_restart = self.pending_restart.take();
-        *self = Self::load(
-            service,
-            selected_identity,
-            preferred_action,
-            self.input_mode,
-            self.input_text.clone(),
-            self.status_message.clone(),
-            self.theme,
-            self.horizontal_metrics_lock,
-        )?;
-        self.pending_restart = pending_restart;
+        let snapshot = DashboardSnapshot::from_session_entries(service.list_dashboard_sessions()?);
+        if snapshot != self.snapshot {
+            self.snapshot = snapshot;
+            self.rebuild_view(false);
+        }
         Ok(())
     }
 
@@ -189,13 +180,13 @@ impl DashboardState {
     }
 
     pub fn selected_session(&self) -> Option<SelectedSession> {
-        self.selected_row()
-            .map(|row| SelectedSession(row.session_id))
+        self.selected_identity
     }
 
     pub fn move_selection_up(&mut self) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
+            self.selected_identity = selected_identity_at(&self.view, self.selected_index);
             self.reconcile_selected_action();
         }
     }
@@ -203,6 +194,7 @@ impl DashboardState {
     pub fn move_selection_down(&mut self) {
         if self.selected_index + 1 < self.view.sessions().count() {
             self.selected_index += 1;
+            self.selected_identity = selected_identity_at(&self.view, self.selected_index);
             self.reconcile_selected_action();
         }
     }
@@ -219,9 +211,10 @@ impl DashboardState {
         if !self.input_text.ends_with(' ') {
             self.input_text.push(' ');
         }
+        self.rebuild_view(true);
     }
 
-    pub fn handle_backspace(&mut self, service: &SessionService) -> Result<()> {
+    pub fn handle_backspace(&mut self, _service: &SessionService) -> Result<()> {
         if self.input_text.pop().is_none() {
             return Ok(());
         }
@@ -231,12 +224,12 @@ impl DashboardState {
             if !self.input_text.is_empty() {
                 self.begin_filter_lock();
             }
-            self.refresh(service)?;
+            self.rebuild_view(true);
         } else if self.input_mode == InputMode::Filter {
             if self.input_text.is_empty() {
                 self.clear_filter_lock();
             }
-            self.refresh(service)?;
+            self.rebuild_view(true);
         }
 
         Ok(())
@@ -348,10 +341,12 @@ impl DashboardState {
     }
 
     fn clear_input(&mut self, service: &SessionService) -> Result<()> {
+        self.last_filter_text = self.input_text.clone();
         self.input_text.clear();
         self.input_mode = InputMode::Filter;
         self.status_message = None;
         self.clear_filter_lock();
+        self.rebuild_view(true);
         self.refresh(service)
     }
 
@@ -360,12 +355,56 @@ impl DashboardState {
             return Ok(true);
         }
 
+        self.last_filter_text = self.input_text.clone();
         self.input_text.clear();
         self.input_mode = InputMode::Filter;
         self.status_message = None;
         self.clear_filter_lock();
+        self.rebuild_view(true);
         self.refresh(service)?;
         Ok(false)
+    }
+
+    fn rebuild_view(&mut self, filter_text_changed: bool) {
+        self.view = build_view(
+            &self.snapshot,
+            &self.input_text,
+            self.input_mode,
+            self.current_directory.clone(),
+        );
+        self.reconcile_selection(filter_text_changed);
+        self.reconcile_selected_action();
+        self.update_filter_lock();
+        self.last_filter_text = self.input_text.clone();
+    }
+
+    fn reconcile_selection(&mut self, filter_text_changed: bool) {
+        let visible_count = self.view.sessions().count();
+        if visible_count == 0 {
+            self.selected_index = 0;
+            self.selected_identity = None;
+            return;
+        }
+
+        if let Some(index) = index_for_selected_identity(&self.view, self.selected_identity) {
+            self.selected_index = index;
+            return;
+        }
+
+        self.selected_identity = if self.has_active_filter() {
+            if filter_text_changed {
+                selected_identity_at(&self.view, 0)
+            } else {
+                default_selected_identity(&self.view, self.current_directory.as_deref())
+                    .or_else(|| selected_identity_at(&self.view, 0))
+            }
+        } else {
+            default_selected_identity(&self.view, self.current_directory.as_deref())
+                .or_else(|| selected_identity_at(&self.view, 0))
+        };
+
+        self.selected_index =
+            index_for_selected_identity(&self.view, self.selected_identity).unwrap_or(0);
     }
 
     fn begin_restart(&mut self, service: &SessionService, target: String) {

@@ -21,6 +21,8 @@ pub struct Theme {
     pub panel_bg: Color,
     pub panel_text: Color,
     pub muted_text: Color,
+    pub group_header_text: Color,
+    pub totals_text: Color,
     pub accent: Color,
     pub success: Color,
     pub danger: Color,
@@ -28,6 +30,8 @@ pub struct Theme {
     pub selection_bg: Color,
     pub selection_text: Color,
     pub button_bg: Color,
+    pub button_text: Color,
+    pub disabled_button_bg: Color,
     pub disabled_text: Color,
     pub help_text: Color,
     pub action_attach_bg: Color,
@@ -78,6 +82,7 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
     let container_bg = derive_surface(background, mode, 0.08, 0.55, MIN_PANEL_CONTRAST);
     let panel_bg = derive_nested_surface(container_bg, mode, 0.05, 0.75, MIN_BUTTON_CONTRAST);
     let button_bg = derive_nested_surface(panel_bg, mode, 0.05, 0.75, MIN_BUTTON_CONTRAST);
+    let disabled_button_bg = mix(panel_bg, button_bg, 0.35);
     let selection_bg = derive_surface(background, mode, 0.18, 0.7, MIN_SELECTION_CONTRAST);
     let muted_text = derive_subdued_text(panel_bg, foreground, MIN_MUTED_CONTRAST, 0.48);
     let disabled_text = derive_subdued_text(button_bg, foreground, MIN_DISABLED_CONTRAST, 0.28);
@@ -92,6 +97,8 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
         panel_bg: panel_bg.into(),
         panel_text: foreground.into(),
         muted_text: muted_text.into(),
+        group_header_text: muted_text.into(),
+        totals_text: Color::Indexed(6),
         accent: Color::Indexed(6),
         success: Color::Indexed(2),
         danger: Color::Indexed(1),
@@ -99,6 +106,8 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
         selection_bg: selection_bg.into(),
         selection_text: selection_text.into(),
         button_bg: button_bg.into(),
+        button_text: foreground.into(),
+        disabled_button_bg: disabled_button_bg.into(),
         disabled_text: disabled_text.into(),
         help_text: muted_text.into(),
         action_attach_bg,

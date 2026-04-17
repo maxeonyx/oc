@@ -38,7 +38,7 @@ pub fn compute_layout(area: Rect, render_model: &RenderModel) -> DashboardLayout
     let outer_width = clamp_outer_width(desired_width, max_width);
 
     let outer = centered_rect(area, outer_width, outer_height);
-    let container = ContainerLayout::new(outer);
+    let container = SurfaceLayout::new(outer, CONTAINER_EDGE_HEIGHT, CONTAINER_HORIZONTAL_PADDING);
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -52,11 +52,11 @@ pub fn compute_layout(area: Rect, render_model: &RenderModel) -> DashboardLayout
 
     DashboardLayout {
         container,
-        input: PanelLayout::new(sections[0]),
-        summary: PanelLayout::new(sections[1]),
-        list: PanelLayout::new(sections[2]),
-        actions: PanelLayout::new(sections[3]),
-        help: PanelLayout::new(sections[4]),
+        input: SurfaceLayout::new(sections[0], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
+        summary: SurfaceLayout::new(sections[1], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
+        list: SurfaceLayout::new(sections[2], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
+        actions: SurfaceLayout::new(sections[3], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
+        help: SurfaceLayout::new(sections[4], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
     }
 }
 
@@ -109,74 +109,51 @@ fn minimum_panel_height(input_content_height: u16) -> u16 {
     non_list_panels_height(input_content_height) + panel_height(MIN_LIST_CONTENT_HEIGHT)
 }
 
-#[derive(Clone, Copy)]
-pub struct ContainerLayout {
-    pub content: Rect,
-    pub top_edge: Rect,
-    pub bottom_edge: Rect,
-}
-
-impl ContainerLayout {
-    fn new(area: Rect) -> Self {
-        let top_edge = Rect::new(area.x, area.y, area.width, CONTAINER_EDGE_HEIGHT);
-        let bottom_edge = Rect::new(
-            area.x,
-            area.bottom().saturating_sub(CONTAINER_EDGE_HEIGHT),
-            area.width,
-            CONTAINER_EDGE_HEIGHT,
-        );
-        let content = area.inner(Margin {
-            horizontal: CONTAINER_HORIZONTAL_PADDING,
-            vertical: CONTAINER_EDGE_HEIGHT,
-        });
-
-        Self {
-            content,
-            top_edge,
-            bottom_edge,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct PanelLayout {
-    pub content: Rect,
-    pub top_edge: Rect,
-    pub bottom_edge: Rect,
-}
-
-impl PanelLayout {
-    fn new(area: Rect) -> Self {
-        let top_edge = Rect::new(area.x, area.y, area.width, PANEL_EDGE_HEIGHT);
-        let bottom_edge = Rect::new(
-            area.x,
-            area.bottom().saturating_sub(PANEL_EDGE_HEIGHT),
-            area.width,
-            PANEL_EDGE_HEIGHT,
-        );
-        let content = area.inner(Margin {
-            horizontal: PANEL_HORIZONTAL_PADDING,
-            vertical: PANEL_EDGE_HEIGHT,
-        });
-
-        Self {
-            content,
-            top_edge,
-            bottom_edge,
-        }
-    }
-}
-
 fn container_height(content_height: u16) -> u16 {
     content_height + (CONTAINER_EDGE_HEIGHT * 2)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
+pub struct SurfaceLayout {
+    pub interior: Rect,
+    pub content: Rect,
+    pub top_edge: Rect,
+    pub bottom_edge: Rect,
+}
+
+impl SurfaceLayout {
+    fn new(area: Rect, edge_height: u16, horizontal_padding: u16) -> Self {
+        let top_edge = Rect::new(area.x, area.y, area.width, edge_height);
+        let bottom_edge = Rect::new(
+            area.x,
+            area.bottom().saturating_sub(edge_height),
+            area.width,
+            edge_height,
+        );
+        let interior = area.inner(Margin {
+            horizontal: 0,
+            vertical: edge_height,
+        });
+        let content = interior.inner(Margin {
+            horizontal: horizontal_padding,
+            vertical: 0,
+        });
+
+        Self {
+            interior,
+            content,
+            top_edge,
+            bottom_edge,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct DashboardLayout {
-    pub container: ContainerLayout,
-    pub input: PanelLayout,
-    pub summary: PanelLayout,
-    pub list: PanelLayout,
-    pub actions: PanelLayout,
-    pub help: PanelLayout,
+    pub container: SurfaceLayout,
+    pub input: SurfaceLayout,
+    pub summary: SurfaceLayout,
+    pub list: SurfaceLayout,
+    pub actions: SurfaceLayout,
+    pub help: SurfaceLayout,
 }

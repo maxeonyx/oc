@@ -1,6 +1,6 @@
 use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
-use oc::tui::command::{CommandParseError, parse_command};
+use oc::tui::command::{parse_command, CommandParseError};
 use oc::tui::filter::{build_view, summary_for_view, totals_for_rows, totals_scope_label};
 use oc::tui::format::abbreviate_directory;
 use oc::tui::selection::{
@@ -51,8 +51,8 @@ fn filter_groups_by_priority_then_match_strength() {
             "session:16",
             "session:31",
             "group:name",
-            "session:54",
             "session:43",
+            "session:54",
             "totals:6:0",
         ],
     );
@@ -89,16 +89,16 @@ fn empty_filter_shows_sessions_when_no_directory_match() {
 }
 
 #[test]
-fn empty_filter_places_directory_matches_first() {
+fn empty_filter_keeps_status_then_id_order_even_with_directory_match() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![
         session_entry(1, "alpha", "/work/alpha", None, SessionStatus::Saved),
-        session_entry(2, "beta", "/tmp/beta", None, SessionStatus::Saved),
+        session_entry(2, "beta", "/tmp/beta", None, SessionStatus::RunningAttached),
         session_entry(
             3,
             "alpha-two",
             "/work/alpha-two",
             None,
-            SessionStatus::Saved,
+            SessionStatus::RunningDetached,
         ),
     ]);
 
@@ -113,10 +113,10 @@ fn empty_filter_places_directory_matches_first() {
         &view,
         &[
             "header",
-            "session:1",
             "session:2",
             "session:3",
-            "totals:3:0",
+            "session:1",
+            "totals:3:2",
         ],
     );
 }
@@ -301,7 +301,7 @@ fn filter_enters_top_result_after_refreshing_from_previous_selection() {
     let unfiltered_view = build_view(&snapshot, "", InputMode::Filter, None);
     let previous_selection = Some(oc::tui::selection::SelectedSession(2));
 
-    assert_eq!(select_index(&unfiltered_view, previous_selection, None), 2);
+    assert_eq!(select_index(&unfiltered_view, previous_selection, None), 1);
 
     let filtered_view = build_view(&snapshot, "1", InputMode::Filter, None);
 

@@ -1,3 +1,5 @@
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -5,9 +7,7 @@ use ratatui::text::{Line, Span};
 use crate::session::SessionStatus;
 
 use super::theme::Theme;
-use crate::tui::format::{
-    centered_rule, display_width, format_column_row, format_memory, ColumnWidths,
-};
+use crate::tui::format::{centered_rule, format_column_row, format_memory, ColumnWidths};
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
     ActionState, CursorPosition, DashboardAction, DashboardGroup, DashboardRow, InputMode,
@@ -16,6 +16,10 @@ use crate::tui::types::{
 const MIN_CONTENT_WIDTH: u16 = 40;
 const SESSION_FOOTER_LINES: usize = 2;
 const SESSION_HEADER_LINES: usize = 1;
+const BUTTON_MIN_WIDTH: usize = 8;
+const BUTTON_LEFT_PADDING: usize = 2;
+const BUTTON_RIGHT_PADDING: usize = 2;
+const BUTTON_SPACING: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HorizontalMetrics {
@@ -38,27 +42,39 @@ impl HorizontalMetrics {
 }
 
 pub struct RenderModel {
-    pub summary_line: Line<'static>,
-    pub input_lines: Vec<Line<'static>>,
+    pub summary_row: RowSpec,
+    pub input_rows: Vec<RowSpec>,
     pub session_table: SessionTable,
-    pub action_lines: Vec<Line<'static>>,
-    pub help_line: Line<'static>,
+    pub action_rows: Vec<RowSpec>,
+    pub help_row: RowSpec,
     content_width: u16,
     input_cursor_offset: u16,
     show_cursor: bool,
 }
 
 pub struct SessionTable {
-    all_lines: Vec<Line<'static>>,
+    all_rows: Vec<RowSpec>,
     body_scroll: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct RowSpec {
+    runs: Vec<StyledRun>,
+    fill_style: Style,
+}
+
+#[derive(Clone, Debug)]
+struct StyledRun {
+    text: String,
+    style: Style,
+}
+
 pub fn horizontal_metrics(state: &DashboardState) -> HorizontalMetrics {
-    horizontal_metrics_with_input(state, true)
+    horizontal_metrics_with_scope(state, MeasurementScope::FrozenLayout)
 }
 
 pub fn expansion_candidate_metrics(state: &DashboardState) -> HorizontalMetrics {
-    horizontal_metrics_with_input(state, false)
+    horizontal_metrics_with_scope(state, MeasurementScope::ExpansionOnly)
 }
 
 impl RenderModel {
@@ -67,11 +83,11 @@ impl RenderModel {
         let session_table = SessionTable::from_state(state, &column_widths, &state.theme);
 
         Self {
-            summary_line: summary_line(state, &state.theme),
-            input_lines: input_lines(state, &state.theme),
+            summary_row: summary_row(state, &state.theme),
+            input_rows: input_rows(state, &state.theme),
             session_table,
-            action_lines: action_lines(state, &state.theme),
-            help_line: help_line(&state.theme),
+            action_rows: action_rows(state, &state.theme),
+            help_row: help_row(&state.theme),
             content_width: metrics.content_width,
             input_cursor_offset: input_cursor_offset(state),
             show_cursor: should_show_cursor(state),
@@ -83,12 +99,12 @@ impl RenderModel {
     }
 
     pub fn input_content_height(&self) -> u16 {
-        self.input_lines.len() as u16
+        self.input_rows.len() as u16
     }
 
     pub fn cursor_position(&self, area: Rect) -> CursorPosition {
         CursorPosition {
-            x: area.x + self.input_cursor_offset,
+            x: area.x + self.input_cursor_offset.min(area.width),
             y: area.y,
         }
     }
@@ -100,30 +116,33 @@ impl RenderModel {
 
 impl SessionTable {
     fn from_state(state: &DashboardState, widths: &ColumnWidths, theme: &Theme) -> Self {
-        let all_lines = session_lines(state, widths, theme);
-        let footer_start = all_lines.len().saturating_sub(SESSION_FOOTER_LINES);
+        let all_rows = session_rows(state, widths, theme);
+        let footer_start = all_rows.len().saturating_sub(SESSION_FOOTER_LINES);
         let body_line_count = footer_start.saturating_sub(1);
         let selected_body_index = selected_body_line_index(state);
 
         Self {
             body_scroll: selected_body_index.min(body_line_count.saturating_sub(1)),
-            all_lines,
+            all_rows,
         }
     }
 
     pub fn line_count(&self) -> usize {
-        self.all_lines.len()
+        self.all_rows.len()
     }
 
-    pub fn visible_lines(&self, max_lines: usize) -> Vec<Line<'static>> {
-        if self.all_lines.len() <= max_lines {
-            return self.all_lines.clone();
+    pub fn visible_lines(&self, width: u16, max_lines: usize) -> Vec<Line<'static>> {
+        if self.all_rows.len() <= max_lines {
+            return self.all_rows.iter().map(|row| row.render(width)).collect();
         }
 
-        let footer_start = self.all_lines.len().saturating_sub(SESSION_FOOTER_LINES);
-        let header = self.all_lines[0].clone();
-        let footer = self.all_lines[footer_start..].to_vec();
-        let body = &self.all_lines[1..footer_start];
+        let footer_start = self.all_rows.len().saturating_sub(SESSION_FOOTER_LINES);
+        let header = self.all_rows[0].render(width);
+        let footer = self.all_rows[footer_start..]
+            .iter()
+            .map(|row| row.render(width))
+            .collect::<Vec<_>>();
+        let body = &self.all_rows[1..footer_start];
         let body_space = max_lines.saturating_sub(SESSION_HEADER_LINES + SESSION_FOOTER_LINES);
         let max_scroll = body.len().saturating_sub(body_space);
         let scroll = self.body_scroll.min(max_scroll);
@@ -131,7 +150,7 @@ impl SessionTable {
             .iter()
             .skip(scroll)
             .take(body_space)
-            .cloned()
+            .map(|row| row.render(width))
             .collect::<Vec<_>>();
 
         std::iter::once(header)
@@ -141,86 +160,173 @@ impl SessionTable {
     }
 }
 
-fn summary_line(state: &DashboardState, theme: &Theme) -> Line<'static> {
-    let summary = state.summary();
-    Line::from(vec![
-        Span::styled(
-            format!("Attached {}", summary.attached),
-            Style::default().fg(theme.success),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("Detached {}", summary.detached),
-            Style::default().fg(theme.warning),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("Saved {}", summary.saved),
-            Style::default().fg(theme.accent),
-        ),
-    ])
+impl RowSpec {
+    fn new(fill_style: Style, runs: Vec<StyledRun>) -> Self {
+        Self { runs, fill_style }
+    }
+
+    fn single(text: impl Into<String>, style: Style) -> Self {
+        Self::new(style, vec![StyledRun::new(text, style)])
+    }
+
+    pub(crate) fn render(&self, width: u16) -> Line<'static> {
+        let target_width = width as usize;
+        let mut remaining = target_width;
+        let mut spans = Vec::new();
+
+        for run in &self.runs {
+            if remaining == 0 {
+                break;
+            }
+
+            let clipped = clip_text_to_width(&run.text, remaining);
+            let clipped_width = display_width(&clipped);
+            if clipped_width == 0 {
+                continue;
+            }
+
+            spans.push(Span::styled(clipped, run.style));
+            remaining = remaining.saturating_sub(clipped_width);
+        }
+
+        if remaining > 0 {
+            spans.push(Span::styled(" ".repeat(remaining), self.fill_style));
+        }
+
+        Line::from(spans)
+    }
 }
 
-fn input_lines(state: &DashboardState, theme: &Theme) -> Vec<Line<'static>> {
+impl StyledRun {
+    fn new(text: impl Into<String>, style: Style) -> Self {
+        Self {
+            text: text.into(),
+            style,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum MeasurementScope {
+    FrozenLayout,
+    ExpansionOnly,
+}
+
+fn summary_row(state: &DashboardState, theme: &Theme) -> RowSpec {
+    let summary = state.summary();
+    RowSpec::new(
+        Style::default().bg(theme.panel_bg),
+        vec![
+            StyledRun::new(
+                format!("Attached {}", summary.attached),
+                Style::default().fg(theme.success).bg(theme.panel_bg),
+            ),
+            StyledRun::new("  ", Style::default().bg(theme.panel_bg)),
+            StyledRun::new(
+                format!("Detached {}", summary.detached),
+                Style::default().fg(theme.warning).bg(theme.panel_bg),
+            ),
+            StyledRun::new("  ", Style::default().bg(theme.panel_bg)),
+            StyledRun::new(
+                format!("Saved {}", summary.saved),
+                Style::default().fg(theme.accent).bg(theme.panel_bg),
+            ),
+        ],
+    )
+}
+
+fn input_rows(state: &DashboardState, theme: &Theme) -> Vec<RowSpec> {
     let mode = match state.input_mode {
         InputMode::Filter => "filter",
         InputMode::Command => "command",
     };
 
-    let mut lines = vec![Line::from(vec![
-        Span::styled(format!("{mode}> "), Style::default().fg(theme.accent)),
-        Span::styled(
-            state.input_text.clone(),
-            Style::default().fg(theme.panel_text),
-        ),
-    ])];
+    let mut rows = vec![RowSpec::new(
+        Style::default().bg(theme.panel_bg),
+        vec![
+            StyledRun::new(
+                format!("{mode}> "),
+                Style::default().fg(theme.accent).bg(theme.panel_bg),
+            ),
+            StyledRun::new(
+                state.input_text.clone(),
+                Style::default().fg(theme.panel_text).bg(theme.panel_bg),
+            ),
+        ],
+    )];
 
     if let Some(status) = &state.status_message {
-        lines.push(Line::from(Span::styled(
+        rows.push(RowSpec::single(
             status.clone(),
-            Style::default().fg(theme.muted_text),
-        )));
+            Style::default().fg(theme.muted_text).bg(theme.panel_bg),
+        ));
     }
 
-    lines
+    rows
 }
 
-fn action_lines(state: &DashboardState, theme: &Theme) -> Vec<Line<'static>> {
+fn action_rows(state: &DashboardState, theme: &Theme) -> Vec<RowSpec> {
     let action_states = action_states(state);
+    let button_widths = action_states
+        .iter()
+        .map(|action_state| button_width(action_state.action))
+        .collect::<Vec<_>>();
+
     let mut top = Vec::new();
     let mut middle = Vec::new();
     let mut bottom = Vec::new();
 
     for (index, action_state) in action_states.iter().enumerate() {
         if index > 0 {
-            top.push(Span::raw("  "));
-            middle.push(Span::raw("  "));
-            bottom.push(Span::raw("  "));
+            let spacer = StyledRun::new(
+                " ".repeat(BUTTON_SPACING),
+                Style::default().bg(theme.panel_bg),
+            );
+            top.push(spacer.clone());
+            middle.push(spacer.clone());
+            bottom.push(spacer);
         }
 
-        top.push(action_padding_span(action_state, theme, '▄'));
-        middle.push(action_label_span(action_state, theme));
-        bottom.push(action_padding_span(action_state, theme, '▀'));
+        top.push(action_cap_run(
+            action_state,
+            theme,
+            '▄',
+            button_widths[index],
+        ));
+        middle.push(action_label_run(action_state, theme, button_widths[index]));
+        bottom.push(action_cap_run(
+            action_state,
+            theme,
+            '▀',
+            button_widths[index],
+        ));
     }
 
-    vec![Line::from(top), Line::from(middle), Line::from(bottom)]
+    vec![
+        RowSpec::new(Style::default().bg(theme.panel_bg), top),
+        RowSpec::new(Style::default().bg(theme.panel_bg), middle),
+        RowSpec::new(Style::default().bg(theme.panel_bg), bottom),
+    ]
 }
 
-fn help_line(theme: &Theme) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("↑↓ ", Style::default().fg(theme.accent)),
-        Span::styled("select  ", Style::default().fg(theme.help_text)),
-        Span::styled("←→ ", Style::default().fg(theme.accent)),
-        Span::styled("action  ", Style::default().fg(theme.help_text)),
-        Span::styled("Enter ", Style::default().fg(theme.accent)),
-        Span::styled("run  ", Style::default().fg(theme.help_text)),
-        Span::styled("Space ", Style::default().fg(theme.accent)),
-        Span::styled("command  ", Style::default().fg(theme.help_text)),
-        Span::styled("Esc ", Style::default().fg(theme.accent)),
-        Span::styled("clear/quit  ", Style::default().fg(theme.help_text)),
-        Span::styled("Ctrl-D ", Style::default().fg(theme.accent)),
-        Span::styled("quit", Style::default().fg(theme.help_text)),
-    ])
+fn help_row(theme: &Theme) -> RowSpec {
+    RowSpec::new(
+        Style::default().bg(theme.panel_bg),
+        vec![
+            help_key("↑↓ ", theme),
+            help_text("select  ", theme),
+            help_key("←→ ", theme),
+            help_text("action  ", theme),
+            help_key("Enter ", theme),
+            help_text("run  ", theme),
+            help_key("Space ", theme),
+            help_text("command  ", theme),
+            help_key("Esc ", theme),
+            help_text("clear/quit  ", theme),
+            help_key("Ctrl-D ", theme),
+            help_text("quit", theme),
+        ],
+    )
 }
 
 fn action_states(state: &DashboardState) -> Vec<ActionState> {
@@ -239,42 +345,36 @@ fn action_states(state: &DashboardState) -> Vec<ActionState> {
         .collect()
 }
 
-fn action_label_span(action_state: &ActionState, theme: &Theme) -> Span<'static> {
-    match (action_state.selected, action_state.enabled) {
+fn action_label_run(action_state: &ActionState, theme: &Theme, width: usize) -> StyledRun {
+    let text = centered_text(action_state.action.label(), width);
+    let style = match (action_state.selected, action_state.enabled) {
         (true, true) => {
             let (fg, bg) = selected_action_colors(action_state.action, theme);
-            Span::styled(
-                format!(" {} ", action_state.action.label()),
-                Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
-            )
+            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD)
         }
-        (false, true) => Span::styled(
-            format!(" {} ", action_state.action.label()),
-            Style::default().fg(theme.panel_text).bg(theme.button_bg),
-        ),
-        _ => Span::styled(
-            format!(" {} ", action_state.action.label()),
-            Style::default()
-                .fg(theme.disabled_text)
-                .bg(theme.panel_bg)
-                .add_modifier(Modifier::DIM),
-        ),
-    }
+        (false, true) => Style::default().fg(theme.button_text).bg(theme.button_bg),
+        _ => Style::default()
+            .fg(theme.disabled_text)
+            .bg(theme.disabled_button_bg)
+            .add_modifier(Modifier::DIM),
+    };
+
+    StyledRun::new(text, style)
 }
 
-fn action_padding_span(action_state: &ActionState, theme: &Theme, ch: char) -> Span<'static> {
-    let label = format!(" {} ", action_state.action.label());
-    let width = display_width(&label);
+fn action_cap_run(action_state: &ActionState, theme: &Theme, ch: char, width: usize) -> StyledRun {
     let style = match (action_state.selected, action_state.enabled) {
         (true, true) => {
             let (_fg, bg) = selected_action_colors(action_state.action, theme);
             Style::default().fg(bg).bg(theme.panel_bg)
         }
         (false, true) => Style::default().fg(theme.button_bg).bg(theme.panel_bg),
-        _ => Style::default().fg(theme.panel_bg).bg(theme.panel_bg),
+        _ => Style::default()
+            .fg(theme.disabled_button_bg)
+            .bg(theme.panel_bg),
     };
 
-    Span::styled(ch.to_string().repeat(width), style)
+    StyledRun::new(ch.to_string().repeat(width), style)
 }
 
 fn selected_action_colors(
@@ -290,9 +390,23 @@ fn selected_action_colors(
     }
 }
 
-fn horizontal_metrics_with_input(state: &DashboardState, include_input: bool) -> HorizontalMetrics {
+fn help_key(text: &str, theme: &Theme) -> StyledRun {
+    StyledRun::new(text, Style::default().fg(theme.accent).bg(theme.panel_bg))
+}
+
+fn help_text(text: &str, theme: &Theme) -> StyledRun {
+    StyledRun::new(
+        text,
+        Style::default().fg(theme.help_text).bg(theme.panel_bg),
+    )
+}
+
+fn horizontal_metrics_with_scope(
+    state: &DashboardState,
+    scope: MeasurementScope,
+) -> HorizontalMetrics {
     let widths = column_widths(state);
-    let content_width = stable_content_width(state, &widths, include_input).max(MIN_CONTENT_WIDTH);
+    let content_width = content_width_for_scope(state, &widths, scope).max(MIN_CONTENT_WIDTH);
 
     HorizontalMetrics {
         column_widths: widths,
@@ -300,23 +414,19 @@ fn horizontal_metrics_with_input(state: &DashboardState, include_input: bool) ->
     }
 }
 
-fn stable_content_width(state: &DashboardState, widths: &ColumnWidths, include_input: bool) -> u16 {
+fn content_width_for_scope(
+    state: &DashboardState,
+    widths: &ColumnWidths,
+    scope: MeasurementScope,
+) -> u16 {
     let summary_width = display_width(&format!(
         "Attached {}  Detached {}  Saved {}",
         state.summary().attached,
         state.summary().detached,
         state.summary().saved
     )) as u16;
-
     let session_width = session_content_width(state, widths);
-    let actions_width = action_states(state)
-        .iter()
-        .enumerate()
-        .map(|(index, action_state)| {
-            let spacer = if index == 0 { 0 } else { 2 };
-            spacer + display_width(&format!(" {} ", action_state.action.label())) as u16
-        })
-        .sum::<u16>();
+    let actions_width = actions_content_width();
     let help_width = display_width(
         "↑↓ select  ←→ action  Enter run  Space command  Esc clear/quit  Ctrl-D quit",
     ) as u16;
@@ -325,17 +435,11 @@ fn stable_content_width(state: &DashboardState, widths: &ColumnWidths, include_i
         .into_iter()
         .max()
         .unwrap_or(MIN_CONTENT_WIDTH);
-    if !include_input {
-        return base_width;
+
+    match scope {
+        MeasurementScope::FrozenLayout => base_width,
+        MeasurementScope::ExpansionOnly => base_width,
     }
-
-    let input_width = input_lines(state, &state.theme)
-        .iter()
-        .map(line_width)
-        .max()
-        .unwrap_or(0);
-
-    base_width.max(input_width)
 }
 
 fn session_content_width(state: &DashboardState, widths: &ColumnWidths) -> u16 {
@@ -381,6 +485,16 @@ fn session_content_width(state: &DashboardState, widths: &ColumnWidths) -> u16 {
     header_width.max(body_width).max(totals_width)
 }
 
+fn actions_content_width() -> u16 {
+    let count = DashboardAction::DISPLAY_ORDER.len();
+    let button_widths = DashboardAction::DISPLAY_ORDER
+        .iter()
+        .map(|action| button_width(*action))
+        .sum::<usize>();
+    let spacing = BUTTON_SPACING * count.saturating_sub(1);
+    (button_widths + spacing) as u16
+}
+
 fn column_widths(state: &DashboardState) -> ColumnWidths {
     let totals = &state.view.totals;
     let mut widths = ColumnWidths {
@@ -404,24 +518,21 @@ fn column_widths(state: &DashboardState) -> ColumnWidths {
     widths
 }
 
-fn session_lines(
-    state: &DashboardState,
-    widths: &ColumnWidths,
-    theme: &Theme,
-) -> Vec<Line<'static>> {
+fn session_rows(state: &DashboardState, widths: &ColumnWidths, theme: &Theme) -> Vec<RowSpec> {
     let header_text = format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", widths);
     let header_width = display_width(&header_text);
-    let mut lines = vec![Line::from(Span::styled(
+    let mut rows = vec![RowSpec::single(
         header_text,
         Style::default()
             .fg(theme.accent)
+            .bg(theme.panel_bg)
             .add_modifier(Modifier::BOLD),
-    ))];
+    )];
 
     let mut session_index = 0;
     for group in &state.view.groups {
-        append_group_lines(
-            &mut lines,
+        append_group_rows(
+            &mut rows,
             group,
             widths,
             state.selected_index,
@@ -431,8 +542,8 @@ fn session_lines(
         );
     }
 
-    lines.push(Line::default());
-    lines.push(Line::from(Span::styled(
+    rows.push(RowSpec::single("", Style::default().bg(theme.panel_bg)));
+    rows.push(RowSpec::single(
         format_column_row(
             &state.view.totals.filtered_sessions.to_string(),
             "total sessions",
@@ -442,14 +553,15 @@ fn session_lines(
             widths,
         ),
         Style::default()
-            .fg(theme.accent)
+            .fg(theme.totals_text)
+            .bg(theme.panel_bg)
             .add_modifier(Modifier::BOLD),
-    )));
-    lines
+    ));
+    rows
 }
 
-fn append_group_lines(
-    lines: &mut Vec<Line<'static>>,
+fn append_group_rows(
+    rows: &mut Vec<RowSpec>,
     group: &DashboardGroup,
     widths: &ColumnWidths,
     selected_index: usize,
@@ -458,16 +570,17 @@ fn append_group_lines(
     theme: &Theme,
 ) {
     if let Some(title) = &group.title {
-        lines.push(Line::from(Span::styled(
+        rows.push(RowSpec::single(
             centered_rule(title, header_width, '─'),
             Style::default()
-                .fg(theme.muted_text)
+                .fg(theme.group_header_text)
+                .bg(theme.panel_bg)
                 .add_modifier(Modifier::DIM),
-        )));
+        ));
     }
 
     for row in &group.sessions {
-        lines.push(Line::from(Span::styled(
+        rows.push(RowSpec::single(
             format_column_row(
                 &row.session_id.to_string(),
                 &row.name,
@@ -477,7 +590,7 @@ fn append_group_lines(
                 widths,
             ),
             row_style(*session_index == selected_index, row, theme),
-        )));
+        ));
         *session_index += 1;
     }
 }
@@ -489,7 +602,9 @@ fn row_style(selected: bool, row: &DashboardRow, theme: &Theme) -> Style {
             .bg(theme.selection_bg)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(status_color(row.status, theme))
+        Style::default()
+            .fg(status_color(row.status, theme))
+            .bg(theme.panel_bg)
     }
 }
 
@@ -533,9 +648,101 @@ fn should_show_cursor(state: &DashboardState) -> bool {
         || (matches!(state.input_mode, InputMode::Filter) && !state.input_text.is_empty())
 }
 
-fn line_width(line: &Line<'_>) -> u16 {
-    line.spans
-        .iter()
-        .map(|span| display_width(&span.content) as u16)
-        .sum()
+fn button_width(action: DashboardAction) -> usize {
+    (display_width(action.label()) + BUTTON_LEFT_PADDING + BUTTON_RIGHT_PADDING)
+        .max(BUTTON_MIN_WIDTH)
+}
+
+fn centered_text(label: &str, width: usize) -> String {
+    let text_width = display_width(label);
+    let total_padding = width.saturating_sub(text_width);
+    let left_padding = total_padding / 2;
+    let right_padding = total_padding.saturating_sub(left_padding);
+    format!(
+        "{}{}{}",
+        " ".repeat(left_padding),
+        label,
+        " ".repeat(right_padding)
+    )
+}
+
+fn clip_text_to_width(text: &str, max_width: usize) -> String {
+    let mut clipped = String::new();
+    let mut used = 0;
+
+    for ch in text.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + ch_width > max_width {
+            break;
+        }
+        clipped.push(ch);
+        used += ch_width;
+    }
+
+    clipped
+}
+
+fn display_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::style::{Color, Style};
+
+    use crate::tui::types::DashboardAction;
+
+    use super::{button_width, clip_text_to_width, display_width, RowSpec, StyledRun};
+
+    #[test]
+    fn row_spec_pads_to_full_width() {
+        let row = RowSpec::new(
+            Style::default().bg(Color::Blue),
+            vec![StyledRun::new(
+                "abc",
+                Style::default().fg(Color::White).bg(Color::Blue),
+            )],
+        );
+
+        let rendered = row.render(6);
+        let combined = rendered
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(combined, "abc   ");
+        assert_eq!(display_width(&combined), 6);
+    }
+
+    #[test]
+    fn row_spec_clips_to_full_width() {
+        let row = RowSpec::new(
+            Style::default().bg(Color::Blue),
+            vec![StyledRun::new(
+                "abcdef",
+                Style::default().fg(Color::White).bg(Color::Blue),
+            )],
+        );
+
+        let rendered = row.render(4);
+        let combined = rendered
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(combined, "abcd");
+        assert_eq!(display_width(&combined), 4);
+    }
+
+    #[test]
+    fn rm_button_uses_minimum_width() {
+        assert!(button_width(DashboardAction::Remove) >= 8);
+    }
+
+    #[test]
+    fn clip_text_respects_display_width_limit() {
+        assert_eq!(clip_text_to_width("abcdef", 3), "abc");
+    }
 }

@@ -47,10 +47,9 @@ fn dashboard_removes_enter_hint_and_shows_restart_for_running_session_with_saved
     create_tmux_session_in_dir_with_size(&parent_session_name, env.root_dir(), 120, 20);
     let pane = launch_dashboard(&env, &parent_session_name);
 
-    assert!(
-        pane.contains("ATTACH    RM    STOP    RESTART"),
-        "pane:\n{pane}"
-    );
+    for label in ["ATTACH", "RM", "STOP", "RESTART"] {
+        assert!(pane.contains(label), "pane:\n{pane}");
+    }
     assert!(!pane.contains("Enter runs"), "pane:\n{pane}");
 }
 
