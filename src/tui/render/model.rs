@@ -90,7 +90,13 @@ struct StyledRun {
 }
 
 pub fn horizontal_metrics(state: &DashboardState) -> HorizontalMetrics {
-    horizontal_metrics_with_scope(state, MeasurementScope::FrozenLayout)
+    let widths = column_widths(state);
+    let content_width = content_width(state, &widths).max(MIN_CONTENT_WIDTH);
+
+    HorizontalMetrics {
+        column_widths: widths,
+        content_width,
+    }
 }
 
 pub fn dashboard_metrics(state: &DashboardState) -> DashboardMetrics {
@@ -105,10 +111,6 @@ pub fn frozen_dashboard_metrics(snapshot: &DashboardSnapshot) -> DashboardMetric
         horizontal: unfiltered_horizontal_metrics(snapshot),
         list_content_height: frozen_list_content_height(snapshot.rows.len()),
     }
-}
-
-pub fn expansion_candidate_metrics(state: &DashboardState) -> HorizontalMetrics {
-    horizontal_metrics_with_scope(state, MeasurementScope::ExpansionOnly)
 }
 
 impl RenderModel {
@@ -243,12 +245,6 @@ impl StyledRun {
             style,
         }
     }
-}
-
-#[derive(Clone, Copy)]
-enum MeasurementScope {
-    FrozenLayout,
-    ExpansionOnly,
 }
 
 fn summary_row(state: &DashboardState, theme: &Theme) -> RowSpec {
@@ -426,19 +422,6 @@ fn help_text(text: &str, theme: &Theme) -> StyledRun {
     )
 }
 
-fn horizontal_metrics_with_scope(
-    state: &DashboardState,
-    scope: MeasurementScope,
-) -> HorizontalMetrics {
-    let widths = column_widths(state);
-    let content_width = content_width_for_scope(state, &widths, scope).max(MIN_CONTENT_WIDTH);
-
-    HorizontalMetrics {
-        column_widths: widths,
-        content_width,
-    }
-}
-
 fn unfiltered_horizontal_metrics(snapshot: &DashboardSnapshot) -> HorizontalMetrics {
     let totals = summary_totals(snapshot);
     let widths = column_widths_for_rows(snapshot.rows.iter(), &totals);
@@ -450,11 +433,7 @@ fn unfiltered_horizontal_metrics(snapshot: &DashboardSnapshot) -> HorizontalMetr
     }
 }
 
-fn content_width_for_scope(
-    state: &DashboardState,
-    widths: &ColumnWidths,
-    scope: MeasurementScope,
-) -> u16 {
+fn content_width(state: &DashboardState, widths: &ColumnWidths) -> u16 {
     let summary_width = display_width(&format!(
         "Attached {}  Detached {}  Saved {}",
         state.summary().attached,
@@ -467,15 +446,10 @@ fn content_width_for_scope(
         "↑↓ select  ←→ action  Enter run  Space command  Esc clear/quit  Ctrl-D quit",
     ) as u16;
 
-    let base_width = [summary_width, session_width, actions_width, help_width]
+    [summary_width, session_width, actions_width, help_width]
         .into_iter()
         .max()
-        .unwrap_or(MIN_CONTENT_WIDTH);
-
-    match scope {
-        MeasurementScope::FrozenLayout => base_width,
-        MeasurementScope::ExpansionOnly => base_width,
-    }
+        .unwrap_or(MIN_CONTENT_WIDTH)
 }
 
 fn unfiltered_content_width(snapshot: &DashboardSnapshot, widths: &ColumnWidths) -> u16 {

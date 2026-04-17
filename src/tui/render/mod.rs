@@ -9,10 +9,7 @@ use super::state::DashboardState;
 use layout::{compute_layout, SurfaceLayout};
 use model::RenderModel;
 
-pub use model::{
-    dashboard_metrics, expansion_candidate_metrics, frozen_dashboard_metrics, DashboardMetrics,
-    HorizontalMetrics,
-};
+pub use model::{dashboard_metrics, frozen_dashboard_metrics, DashboardMetrics, HorizontalMetrics};
 pub use theme::{detect_theme, Theme};
 
 pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
