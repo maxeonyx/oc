@@ -30,6 +30,7 @@
     "oc::migration_and_memory$hidden_memory_parser_reads_proc_status_kib": "passing",
     "oc::migration_and_memory$migrate_imports_old_aliases_file_idempotently": "passing",
     "oc::migration_and_memory$migrate_reports_conflicts_without_overwriting": "passing",
+    "oc::oc$tui::render::theme::tests::group_header_contrast_stays_within_bound_for_representative_palettes": "pending",
     "oc::session_cli$new_creates_alias_launches_tmux_session_and_attaches": "passing",
     "oc::session_cli$new_rejects_duplicate_name_without_creating_second_tmux_session": "passing",
     "oc::session_cli$new_rejects_missing_directory": "passing",
