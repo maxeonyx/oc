@@ -13,9 +13,9 @@ const MIN_BUTTON_CONTRAST: f32 = 1.08;
 const MIN_SELECTION_CONTRAST: f32 = 1.35;
 const MIN_MUTED_CONTRAST: f32 = 2.4;
 const MIN_DISABLED_CONTRAST: f32 = 1.8;
-const GROUP_HEADER_TARGET_MIN_CONTRAST: f32 = 1.08;
-const GROUP_HEADER_TARGET_MAX_CONTRAST: f32 = 1.12;
-const GROUP_HEADER_HARD_MAX_CONTRAST: f32 = 1.15;
+const GROUP_HEADER_TARGET_MIN_CONTRAST: f32 = 1.04;
+const GROUP_HEADER_TARGET_MAX_CONTRAST: f32 = 1.06;
+const GROUP_HEADER_HARD_MAX_CONTRAST: f32 = 1.075;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
@@ -284,7 +284,7 @@ fn derive_group_header_text(background: RgbColor, foreground: RgbColor) -> RgbCo
         }
 
         fallback = candidate;
-        foreground_weight += 0.01;
+        foreground_weight += 0.005;
     }
 
     if let Some((candidate, contrast)) = first_above_min {
