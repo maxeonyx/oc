@@ -93,7 +93,7 @@ These principles govern the rendering architecture. Code changes to `src/tui/ren
 17. Button state (enabled/disabled/selected) changes style only, never geometry.
 
 **Emphasis:**
-18. Structural separators (group headers, separator lines) are surface features. Their color derives from the panel background shifted slightly toward text — much closer to background than to content. Not derived from text or muted-text tokens. Contrast ratio against panel background must not exceed ~1.15; they should be near-invisible background features, not readable labels.
+18. Structural separators (group headers, separator lines) are surface features. Their color derives from the panel background shifted slightly toward text — much closer to background than to content. Not derived from text or muted-text tokens. Contrast ratio against panel background must not exceed ~1.20; they should be near-invisible background features, not readable labels.
 
 **Aspect ratio:**
 19. Terminal cells are ~1:2 (1 wide, 2 tall). Horizontal padding should be 2 columns where vertical padding is 1 row (half-block), to maintain visual consistency.
