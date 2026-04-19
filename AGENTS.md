@@ -73,6 +73,7 @@ These principles govern the rendering architecture. Code changes to `src/tui/ren
 **Interface stability:**
 7. Dashboard dimensions (width AND height) are computed from unfiltered data with worst-case group header reservation (4 rows). They change only on terminal resize or data structure changes.
 8. Filtering changes content within a fixed frame — never changes dashboard dimensions.
+8a. Footer rows (totals, status) are pinned to the bottom of their panel. When filtering reduces content, slack space appears above the footer — never below it.
 
 **Reactivity:**
 9. Render is pure — render ticks never mutate selection, filter results, or layout caches.
@@ -92,7 +93,7 @@ These principles govern the rendering architecture. Code changes to `src/tui/ren
 17. Button state (enabled/disabled/selected) changes style only, never geometry.
 
 **Emphasis:**
-18. Structural separators (group headers, separator lines) are surface features. Their color derives from the panel background shifted slightly toward text — much closer to background than to content. Not derived from text or muted-text tokens.
+18. Structural separators (group headers, separator lines) are surface features. Their color derives from the panel background shifted slightly toward text — much closer to background than to content. Not derived from text or muted-text tokens. Contrast ratio against panel background must not exceed ~1.15; they should be near-invisible background features, not readable labels.
 
 **Aspect ratio:**
 19. Terminal cells are ~1:2 (1 wide, 2 tall). Horizontal padding should be 2 columns where vertical padding is 1 row (half-block), to maintain visual consistency.
