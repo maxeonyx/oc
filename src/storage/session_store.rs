@@ -35,16 +35,7 @@ impl SessionStore {
             .context("failed to start session save transaction")?;
 
         let id = next_session_id(&transaction)?;
-        let directory = alias.directory.display().to_string();
-        let serialized_opencode_args = serialize_opencode_args(&alias.opencode_args)?;
-
-        insert_alias_row(
-            &transaction,
-            id,
-            &alias.name,
-            &directory,
-            &serialized_opencode_args,
-        )?;
+        insert_alias_row(&transaction, id, &alias)?;
 
         transaction
             .commit()
@@ -115,16 +106,14 @@ impl SessionStore {
     }
 
     pub fn list_saved_sessions(&self) -> Result<Vec<SavedSession>> {
-        let mut statement = self
-            .connection
-            .prepare(
-                "
-                SELECT id, name, directory, opencode_session_id, opencode_args
-                FROM sessions
-                ORDER BY id
-                ",
-            )
-            .context("failed to prepare saved session listing query")?;
+        let mut statement = self.prepare_saved_session_query(
+            "
+            SELECT id, name, directory, opencode_session_id, opencode_args
+            FROM sessions
+            ORDER BY id
+            ",
+            "failed to prepare saved session listing query",
+        )?;
 
         statement
             .query_map([], map_saved_session_row)
@@ -133,36 +122,79 @@ impl SessionStore {
             .context("failed to decode saved session rows")
     }
 
-    fn find_by_id(&self, id: i64) -> Result<SavedSession> {
-        self.connection
-            .query_row(
-                "
-                SELECT id, name, directory, opencode_session_id, opencode_args
-                FROM sessions
-                WHERE id = ?1
-                ",
-                params![id],
-                map_saved_session_row,
+    pub fn update_opencode_session_id(
+        &mut self,
+        name: &str,
+        opencode_session_id: Option<&str>,
+    ) -> Result<()> {
+        let updated_rows = self
+            .connection
+            .execute(
+                "UPDATE sessions SET opencode_session_id = ?1 WHERE name = ?2",
+                params![opencode_session_id, name],
             )
-            .optional()
-            .with_context(|| format!("failed to look up session with numeric ID {id}"))?
-            .ok_or_else(|| anyhow!("Session {id} not found"))
+            .with_context(|| {
+                format!(
+                    "failed to update OpenCode session ID for session alias '{name}' in storage"
+                )
+            })?;
+
+        if updated_rows == 0 {
+            bail!("Session alias '{name}' not found");
+        }
+
+        Ok(())
+    }
+
+    fn find_by_id(&self, id: i64) -> Result<SavedSession> {
+        self.find_saved_session(
+            "
+            SELECT id, name, directory, opencode_session_id, opencode_args
+            FROM sessions
+            WHERE id = ?1
+            ",
+            params![id],
+            &format!("failed to look up session with numeric ID {id}"),
+        )?
+        .ok_or_else(|| anyhow!("Session {id} not found"))
     }
 
     fn find_by_name(&self, name: &str) -> Result<SavedSession> {
+        self.find_saved_session(
+            "
+            SELECT id, name, directory, opencode_session_id, opencode_args
+            FROM sessions
+            WHERE name = ?1
+            ",
+            params![name],
+            &format!("failed to look up session alias '{name}'"),
+        )?
+        .ok_or_else(|| anyhow!("Session alias '{name}' not found"))
+    }
+
+    fn prepare_saved_session_query<'conn>(
+        &'conn self,
+        sql: &str,
+        error_context: &str,
+    ) -> Result<rusqlite::Statement<'conn>> {
         self.connection
-            .query_row(
-                "
-                SELECT id, name, directory, opencode_session_id, opencode_args
-                FROM sessions
-                WHERE name = ?1
-                ",
-                params![name],
-                map_saved_session_row,
-            )
+            .prepare(sql)
+            .context(error_context.to_string())
+    }
+
+    fn find_saved_session<P>(
+        &self,
+        sql: &str,
+        params: P,
+        error_context: &str,
+    ) -> Result<Option<SavedSession>>
+    where
+        P: rusqlite::Params,
+    {
+        self.connection
+            .query_row(sql, params, map_saved_session_row)
             .optional()
-            .with_context(|| format!("failed to look up session alias '{name}'"))?
-            .ok_or_else(|| anyhow!("Session alias '{name}' not found"))
+            .context(error_context.to_string())
     }
 }
 
@@ -217,22 +249,19 @@ fn deserialize_opencode_args(opencode_args_json: String) -> Result<Vec<String>> 
     })
 }
 
-fn insert_alias_row(
-    transaction: &Transaction<'_>,
-    id: i64,
-    name: &str,
-    directory: &str,
-    serialized_opencode_args: &str,
-) -> Result<()> {
+fn insert_alias_row(transaction: &Transaction<'_>, id: i64, alias: &NewSessionAlias) -> Result<()> {
+    let directory = alias.directory.display().to_string();
+    let serialized_opencode_args = serialize_opencode_args(&alias.opencode_args)?;
+
     match transaction.execute(
         "
         INSERT INTO sessions (id, name, directory, opencode_session_id, opencode_args)
         VALUES (?1, ?2, ?3, NULL, ?4)
         ",
-        params![id, name, directory, serialized_opencode_args],
+        params![id, alias.name, directory, serialized_opencode_args],
     ) {
         Ok(_) => Ok(()),
-        Err(error) => Err(map_insert_error(transaction, name, error)),
+        Err(error) => Err(map_insert_error(transaction, &alias.name, error)),
     }
 }
 

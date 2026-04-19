@@ -97,25 +97,26 @@ impl SessionService {
 
     pub fn activate_session(&self, saved_session: &SavedSession) -> Result<()> {
         let tmux = self.open_tmux();
-        self.ensure_tmux_session_running(&tmux, saved_session)?;
-        self.attach_to_session(&tmux, saved_session)
+        let launch = SessionLaunch::for_saved_session(&tmux, saved_session);
+        self.ensure_tmux_session_running(&tmux, &launch)?;
+        self.attach_to_session(&tmux, &launch)
     }
 
     pub fn stop_session(&self, target: &str) -> Result<()> {
         let saved_session = self.resolve_session_ref(target)?;
         let tmux = self.open_tmux();
-        let tmux_session_name = tmux.managed_session_name(&saved_session.name);
+        let launch = SessionLaunch::for_saved_session(&tmux, &saved_session);
 
-        tmux.graceful_stop(&tmux_session_name)
+        tmux.graceful_stop(&launch.tmux_session_name)
             .with_context(|| format!("failed to stop running session '{}'", saved_session.name))
     }
 
     pub fn remove_session(&self, target: &str) -> Result<()> {
         let saved_session = self.resolve_session_ref(target)?;
         let tmux = self.open_tmux();
-        let tmux_session_name = tmux.managed_session_name(&saved_session.name);
+        let launch = SessionLaunch::for_saved_session(&tmux, &saved_session);
 
-        tmux.kill_session_if_exists(&tmux_session_name)
+        tmux.kill_session_if_exists(&launch.tmux_session_name)
             .with_context(|| {
                 format!(
                     "failed to remove tmux session for session '{}'",
@@ -134,7 +135,7 @@ impl SessionService {
 
     pub fn restart_session(&self, target: &str) -> Result<()> {
         let saved_session = self.resolve_session_ref(target)?;
-        let opencode_session_id = saved_session.opencode_session_id.as_ref().ok_or_else(|| {
+        let _opencode_session_id = saved_session.opencode_session_id.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
                 "Session '{}' cannot be restarted because it has no saved OpenCode session ID",
                 saved_session.name
@@ -142,24 +143,23 @@ impl SessionService {
         })?;
 
         let tmux = self.open_tmux();
-        let tmux_session_name = tmux.managed_session_name(&saved_session.name);
-        let mut opencode_args = saved_session.opencode_args.clone();
-        opencode_args.splice(
-            0..0,
-            [String::from("--session"), opencode_session_id.clone()],
-        );
+        let launch = SessionLaunch::for_saved_session(&tmux, &saved_session);
 
-        tmux.restart_session(&tmux_session_name, &saved_session.directory, &opencode_args)
-            .with_context(|| format!("failed to restart session '{}'", saved_session.name))
+        tmux.restart_session(
+            &launch.tmux_session_name,
+            &launch.directory,
+            &launch.opencode_args,
+        )
+        .with_context(|| format!("failed to restart session '{}'", saved_session.name))
     }
 
     pub fn move_session(&self, target: &str, new_dir: PathBuf) -> Result<()> {
         let saved_session = self.resolve_session_ref(target)?;
         let new_directory = resolve_new_directory(Some(new_dir))?;
         let tmux = self.open_tmux();
-        let tmux_session_name = tmux.managed_session_name(&saved_session.name);
+        let launch = SessionLaunch::for_saved_session(&tmux, &saved_session);
 
-        if tmux.session_exists(&tmux_session_name)? {
+        if tmux.session_exists(&launch.tmux_session_name)? {
             anyhow::bail!(
                 "Session '{}' must be stopped before moving its directory",
                 saved_session.name
@@ -226,34 +226,50 @@ impl SessionService {
         store: &mut SessionStore,
         saved_session: SavedSession,
     ) -> Result<()> {
-        if let Err(error) = self.ensure_tmux_session_running(tmux, &saved_session) {
+        let launch = SessionLaunch::for_saved_session(tmux, &saved_session);
+
+        if let Err(error) = self.ensure_tmux_session_running(tmux, &launch) {
             rollback_saved_session(store, &saved_session.name, error)?;
         }
 
-        self.attach_to_session(tmux, &saved_session)
+        self.attach_to_session(tmux, &launch)
     }
 
-    fn ensure_tmux_session_running(&self, tmux: &Tmux, saved_session: &SavedSession) -> Result<()> {
-        let tmux_session_name =
-            saved_session.managed_tmux_session_name(tmux.managed_session_prefix());
-
-        if !tmux.session_exists(&tmux_session_name)? {
+    fn ensure_tmux_session_running(&self, tmux: &Tmux, launch: &SessionLaunch) -> Result<()> {
+        if !tmux.session_exists(&launch.tmux_session_name)? {
             tmux.launch_opencode_session(
-                &tmux_session_name,
-                &saved_session.directory,
-                &launch_opencode_args(saved_session),
+                &launch.tmux_session_name,
+                &launch.directory,
+                &launch.opencode_args,
             )
-            .with_context(|| format!("failed to launch session '{}'", saved_session.name))?;
+            .with_context(|| format!("failed to launch session '{}'", launch.session_name))?;
         }
 
         Ok(())
     }
 
-    fn attach_to_session(&self, tmux: &Tmux, saved_session: &SavedSession) -> Result<()> {
-        let tmux_session_name =
-            saved_session.managed_tmux_session_name(tmux.managed_session_prefix());
-        tmux.attach_session(&tmux_session_name)
-            .with_context(|| format!("failed to attach to session '{}'", saved_session.name))
+    fn attach_to_session(&self, tmux: &Tmux, launch: &SessionLaunch) -> Result<()> {
+        tmux.attach_session(&launch.tmux_session_name)
+            .with_context(|| format!("failed to attach to session '{}'", launch.session_name))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SessionLaunch {
+    session_name: String,
+    tmux_session_name: String,
+    directory: PathBuf,
+    opencode_args: Vec<String>,
+}
+
+impl SessionLaunch {
+    fn for_saved_session(tmux: &Tmux, saved_session: &SavedSession) -> Self {
+        Self {
+            session_name: saved_session.name.clone(),
+            tmux_session_name: tmux.managed_session_name(&saved_session.name),
+            directory: saved_session.directory.clone(),
+            opencode_args: launch_opencode_args(saved_session),
+        }
     }
 }
 
