@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use crate::session::SessionStatus;
 
 use super::theme::Theme;
-use crate::tui::format::{ColumnWidths, centered_rule, format_column_row, format_memory};
+use crate::tui::format::{centered_rule, format_column_row, format_memory, ColumnWidths};
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
     ActionState, CursorPosition, DashboardAction, DashboardGroup, DashboardRow, DashboardSnapshot,
@@ -595,8 +595,7 @@ fn append_group_rows(
             centered_rule(title, content_width, '─'),
             Style::default()
                 .fg(theme.group_header_text)
-                .bg(theme.panel_bg)
-                .add_modifier(Modifier::DIM),
+                .bg(theme.panel_bg),
         ));
     }
 
