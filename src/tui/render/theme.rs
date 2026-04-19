@@ -4,7 +4,7 @@ use std::time::Duration;
 use palette::{FromColor, Hsl, Srgb};
 use ratatui::style::Color;
 use terminal_colorsaurus::{
-    color_palette, ColorPalette, QueryOptions, ThemeMode as DetectedThemeMode,
+    ColorPalette, QueryOptions, ThemeMode as DetectedThemeMode, color_palette,
 };
 
 const COLOR_QUERY_TIMEOUT: Duration = Duration::from_millis(400);
@@ -465,8 +465,8 @@ impl From<terminal_colorsaurus::Color> for RgbColor {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_theme, contrast_ratio, RgbColor, ThemeMode, GROUP_HEADER_HARD_MAX_CONTRAST,
-        GROUP_HEADER_TARGET_MIN_CONTRAST,
+        GROUP_HEADER_HARD_MAX_CONTRAST, GROUP_HEADER_TARGET_MIN_CONTRAST, RgbColor, ThemeMode,
+        build_theme, contrast_ratio,
     };
     use ratatui::style::Color;
 
