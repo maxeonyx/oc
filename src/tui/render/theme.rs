@@ -16,6 +16,10 @@ const MIN_DISABLED_CONTRAST: f32 = 1.8;
 const GROUP_HEADER_TARGET_MIN_CONTRAST: f32 = 1.13;
 const GROUP_HEADER_TARGET_MAX_CONTRAST: f32 = 1.17;
 const GROUP_HEADER_HARD_MAX_CONTRAST: f32 = 1.20;
+const GROUP_HEADER_LABEL_TARGET_MIN_CONTRAST: f32 = 1.42;
+const GROUP_HEADER_LABEL_TARGET_MAX_CONTRAST: f32 = 1.46;
+const GROUP_HEADER_LABEL_HARD_MAX_CONTRAST: f32 = 1.50;
+const GROUP_HEADER_CONTRAST_STEP: f32 = 0.01;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
@@ -25,6 +29,7 @@ pub struct Theme {
     pub panel_text: Color,
     pub muted_text: Color,
     pub group_header_text: Color,
+    pub group_header_label_text: Color,
     pub totals_text: Color,
     pub accent: Color,
     pub success: Color,
@@ -89,6 +94,7 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
     let selection_bg = derive_surface(background, mode, 0.18, 0.7, MIN_SELECTION_CONTRAST);
     let muted_text = derive_subdued_text(panel_bg, foreground, MIN_MUTED_CONTRAST, 0.48);
     let group_header_text = derive_group_header_text(panel_bg, foreground);
+    let group_header_label_text = derive_group_header_label_text(panel_bg, foreground);
     let disabled_text = derive_subdued_text(button_bg, foreground, MIN_DISABLED_CONTRAST, 0.28);
     let selection_text = best_text_color(selection_bg, foreground, background);
     let (action_attach_bg, action_attach_text) =
@@ -105,6 +111,7 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
         panel_text: foreground.into(),
         muted_text: muted_text.into(),
         group_header_text: group_header_text.into(),
+        group_header_label_text: group_header_label_text.into(),
         totals_text: Color::Indexed(6),
         accent: Color::Indexed(6),
         success: Color::Indexed(2),
@@ -266,6 +273,32 @@ fn derive_subdued_text(
 }
 
 fn derive_group_header_text(background: RgbColor, foreground: RgbColor) -> RgbColor {
+    derive_targeted_text(
+        background,
+        foreground,
+        GROUP_HEADER_TARGET_MIN_CONTRAST,
+        GROUP_HEADER_TARGET_MAX_CONTRAST,
+        GROUP_HEADER_HARD_MAX_CONTRAST,
+    )
+}
+
+fn derive_group_header_label_text(background: RgbColor, foreground: RgbColor) -> RgbColor {
+    derive_targeted_text(
+        background,
+        foreground,
+        GROUP_HEADER_LABEL_TARGET_MIN_CONTRAST,
+        GROUP_HEADER_LABEL_TARGET_MAX_CONTRAST,
+        GROUP_HEADER_LABEL_HARD_MAX_CONTRAST,
+    )
+}
+
+fn derive_targeted_text(
+    background: RgbColor,
+    foreground: RgbColor,
+    target_min_contrast: f32,
+    target_max_contrast: f32,
+    hard_max_contrast: f32,
+) -> RgbColor {
     let mut best_under_cap = None;
     let mut first_above_min = None;
     let mut fallback = mix(background, foreground, 0.0);
@@ -275,26 +308,26 @@ fn derive_group_header_text(background: RgbColor, foreground: RgbColor) -> RgbCo
         let candidate = mix(background, foreground, foreground_weight);
         let contrast = contrast_ratio(candidate, background);
 
-        if contrast <= GROUP_HEADER_HARD_MAX_CONTRAST {
+        if contrast <= hard_max_contrast {
             best_under_cap = Some((candidate, contrast));
         }
-        if contrast >= GROUP_HEADER_TARGET_MIN_CONTRAST {
+        if contrast >= target_min_contrast {
             first_above_min = Some((candidate, contrast));
             break;
         }
 
         fallback = candidate;
-        foreground_weight += 0.01;
+        foreground_weight += GROUP_HEADER_CONTRAST_STEP;
     }
 
     if let Some((candidate, contrast)) = first_above_min {
-        if contrast <= GROUP_HEADER_TARGET_MAX_CONTRAST {
+        if contrast <= target_max_contrast {
             return candidate;
         }
     }
 
     if let Some((candidate, contrast)) = best_under_cap {
-        if contrast >= GROUP_HEADER_TARGET_MIN_CONTRAST {
+        if contrast >= target_min_contrast {
             return candidate;
         }
     }

@@ -614,7 +614,9 @@ fn group_header_row(title: &str, content_width: usize, theme: &Theme) -> RowSpec
     let rule_style = Style::default()
         .fg(theme.group_header_text)
         .bg(theme.panel_bg);
-    let label_style = Style::default().fg(theme.muted_text).bg(theme.panel_bg);
+    let label_style = Style::default()
+        .fg(theme.group_header_label_text)
+        .bg(theme.panel_bg);
     let label = format!(" {title} ");
     let label_width = display_width(&label);
 
