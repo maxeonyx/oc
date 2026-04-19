@@ -1,9 +1,10 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session, read_saved_sessions,
-    saved_session_row, tmux_pane_current_command, tmux_pane_pid, wait_for_file_contains,
-    wait_for_file_exists, wait_for_tmux_client_detach_window,
+    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session,
+    read_opencode_sessions, read_saved_sessions, saved_session_row, tmux_pane_current_command,
+    tmux_pane_pid, wait_for_file_contains, wait_for_file_exists,
+    wait_for_tmux_client_detach_window,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -270,4 +271,57 @@ fn stop_fails_cleanly_when_target_not_found() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not found"));
+}
+
+#[test]
+fn launch_detach_captures_session_id() {
+    let env = TestEnv::new("capture-session-id-on-launch");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "dc"]);
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+
+    let captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
+        .expect("fake opencode session id log should be readable")
+        .trim()
+        .to_string();
+
+    assert_saved_sessions(
+        &env,
+        vec![SavedSessionRow {
+            id: 1,
+            name: String::from("dc"),
+            directory: env.root_dir().to_path_buf(),
+            opencode_session_id: Some(captured_id.clone()),
+            opencode_args: String::from(EMPTY_ARGS_JSON),
+        }],
+    );
+
+    let opencode_sessions = read_opencode_sessions(env.opencode_db());
+    assert_eq!(opencode_sessions.len(), 1);
+    assert_eq!(opencode_sessions[0].id, captured_id);
+}
+
+#[test]
+fn restart_uses_captured_session_id() {
+    let env = TestEnv::new("restart-uses-captured-session-id");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "dc"]);
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+
+    let captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
+        .expect("fake opencode session id log should be readable")
+        .trim()
+        .to_string();
+
+    env.oc_cmd().args(["restart", "dc"]).assert().success();
+    wait_for_file_exists(&fake_opencode.args_log_path(), Duration::from_secs(5));
+
+    assert_eq!(
+        fs::read_to_string(fake_opencode.args_log_path()).expect("args log should be readable"),
+        format!("--session\n{captured_id}\ncontinue\n")
+    );
 }

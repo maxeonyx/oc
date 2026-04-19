@@ -2,10 +2,10 @@ mod common;
 
 use common::{
     FakeOpenCode, SavedSessionRow, TestEnv, capture_tmux_pane, create_tmux_session_in_dir,
-    detach_tmux_client_from_session, read_saved_sessions, saved_session_row,
-    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_session_attached_count,
-    wait_for_file_exists, wait_for_tmux_client_detach_window, wait_for_tmux_pane_contains,
-    wait_for_tmux_session_attached,
+    detach_tmux_client_from_session, insert_opencode_session, read_saved_sessions,
+    saved_session_row, send_keys_to_tmux_session, spawn_tmux_attach_client,
+    tmux_session_attached_count, wait_for_file_exists, wait_for_tmux_client_detach_window,
+    wait_for_tmux_pane_contains, wait_for_tmux_session_attached,
 };
 use predicates::prelude::*;
 use std::path::Path;
@@ -361,4 +361,28 @@ fn hidden_session_dump_reports_running_attached_session() {
         "Expected helper attach client to exit cleanly"
     );
     assert!(tmux_session_attached_count(&session_name) == 0);
+}
+
+#[test]
+fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_match() {
+    let env = TestEnv::new("catchup-single-root-match");
+
+    create_saved_alias(&env, "dc", Some(env.root_dir()));
+    insert_opencode_session(env.opencode_db(), "ses_single_match", env.root_dir(), None);
+
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        read_saved_sessions(env.aliases_file()),
+        vec![SavedSessionRow {
+            id: 1,
+            name: String::from("dc"),
+            directory: env.root_dir().to_path_buf(),
+            opencode_session_id: Some(String::from("ses_single_match")),
+            opencode_args: String::from(EMPTY_ARGS_JSON),
+        }]
+    );
 }

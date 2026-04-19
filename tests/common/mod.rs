@@ -495,6 +495,13 @@ pub struct SavedSessionRow {
     pub opencode_args: String,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct OpenCodeSessionRow {
+    pub id: String,
+    pub directory: PathBuf,
+    pub parent_id: Option<String>,
+}
+
 impl TestEnv {
     pub fn new(scope_name: &str) -> Self {
         let tmux_scope_prefix = tmux_scope_prefix(scope_name);
@@ -570,19 +577,78 @@ impl TestEnv {
         let script_path = bin_dir.join("opencode");
         fs::write(
             &script_path,
-            "#!/bin/sh
-set -eu
-log_dir=\"${OC_FAKE_OPENCODE_LOG_DIR:?}\"
-pwd >\"$log_dir/cwd.txt\"
-printf '%s\n' \"$@\" >\"$log_dir/args.txt\"
-printf '%s\n' \"$$\" >\"$log_dir/pid.txt\"
-printf 'START\n' >>\"$log_dir/events.txt\"
-trap 'printf \"INT\\n\" >>\"$log_dir/events.txt\"' INT
-while IFS= read -r line; do
-    printf 'LINE:%s\n' \"$line\" >>\"$log_dir/events.txt\"
-done
-printf 'EOF\n' >>\"$log_dir/events.txt\"
-",
+            concat!(
+                "#!/bin/sh\n",
+                "set -eu\n",
+                "log_dir=\"${OC_FAKE_OPENCODE_LOG_DIR:?}\"\n",
+                "opencode_db=\"${OC_OPENCODE_DB:?}\"\n",
+                "pwd >\"$log_dir/cwd.txt\"\n",
+                "printf '%s\\n' \"$@\" >\"$log_dir/args.txt\"\n",
+                "printf '%s\\n' \"$$\" >\"$log_dir/pid.txt\"\n",
+                "session_id=\"$(python3 - \"$opencode_db\" \"$log_dir\" \"$PWD\" \"$@\" <<'PY'\n",
+                "import sqlite3\n",
+                "import sys\n",
+                "import time\n",
+                "import uuid\n",
+                "from pathlib import Path\n",
+                "\n",
+                "opencode_db = Path(sys.argv[1])\n",
+                "log_dir = Path(sys.argv[2])\n",
+                "directory = sys.argv[3]\n",
+                "argv = sys.argv[4:]\n",
+                "\n",
+                "session_id = None\n",
+                "for index, arg in enumerate(argv):\n",
+                "    if arg == '--session':\n",
+                "        if index + 1 >= len(argv):\n",
+                "            raise SystemExit('fake opencode expected a session ID after --session')\n",
+                "        session_id = argv[index + 1]\n",
+                "        break\n",
+                "\n",
+                "if session_id is None:\n",
+                "    session_id = f'ses_{uuid.uuid4().hex}'\n",
+                "\n",
+                "opencode_db.parent.mkdir(parents=True, exist_ok=True)\n",
+                "connection = sqlite3.connect(opencode_db)\n",
+                "try:\n",
+                "    connection.execute(\n",
+                "        '''\n",
+                "        CREATE TABLE IF NOT EXISTS session (\n",
+                "            id TEXT PRIMARY KEY NOT NULL,\n",
+                "            directory TEXT NOT NULL,\n",
+                "            parent_id TEXT,\n",
+                "            time_created INTEGER NOT NULL,\n",
+                "            time_updated INTEGER NOT NULL\n",
+                "        )\n",
+                "        '''\n",
+                "    )\n",
+                "    now = int(time.time())\n",
+                "    connection.execute(\n",
+                "        '''\n",
+                "        INSERT INTO session (id, directory, parent_id, time_created, time_updated)\n",
+                "        VALUES (?, ?, NULL, ?, ?)\n",
+                "        ON CONFLICT(id) DO UPDATE SET\n",
+                "            directory = excluded.directory,\n",
+                "            time_updated = excluded.time_updated\n",
+                "        ''',\n",
+                "        (session_id, directory, now, now),\n",
+                "    )\n",
+                "    connection.commit()\n",
+                "finally:\n",
+                "    connection.close()\n",
+                "\n",
+                "(log_dir / 'session-id.txt').write_text(f'{session_id}\\n', encoding='utf-8')\n",
+                "print(session_id)\n",
+                "PY\n",
+                ")\"\n",
+                "printf 'START\\n' >>\"$log_dir/events.txt\"\n",
+                "printf 'Fake OpenCode started: %s\\n' \"$session_id\"\n",
+                "trap 'printf \"INT\\n\" >>\"$log_dir/events.txt\"' INT\n",
+                "while IFS= read -r line; do\n",
+                "    printf 'LINE:%s\\n' \"$line\" >>\"$log_dir/events.txt\"\n",
+                "done\n",
+                "printf 'EOF\\n' >>\"$log_dir/events.txt\"\n",
+            ),
         )
         .unwrap_or_else(|error| panic!("Failed to write {}: {}", script_path.display(), error));
 
@@ -646,6 +712,10 @@ impl FakeOpenCode {
         self.log_dir.join("events.txt")
     }
 
+    pub fn session_id_log_path(&self) -> PathBuf {
+        self.log_dir.join("session-id.txt")
+    }
+
     pub fn apply_to_command(&self, command: &mut StdCommand) {
         command
             .env("PATH", prepend_path(&self.bin_dir))
@@ -693,6 +763,90 @@ pub fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
         .expect("session rows should be readable")
         .collect::<Result<Vec<_>, _>>()
         .expect("session rows should decode")
+}
+
+pub fn read_opencode_sessions(db_path: &Path) -> Vec<OpenCodeSessionRow> {
+    if !db_path.exists() {
+        return Vec::new();
+    }
+
+    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, directory, parent_id
+            FROM session
+            ORDER BY id
+            ",
+        )
+        .expect("OpenCode session table should be queryable");
+
+    statement
+        .query_map(params![], |row| {
+            Ok(OpenCodeSessionRow {
+                id: row.get(0)?,
+                directory: PathBuf::from(row.get::<_, String>(1)?),
+                parent_id: row.get(2)?,
+            })
+        })
+        .expect("OpenCode session rows should be readable")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("OpenCode session rows should decode")
+}
+
+pub fn insert_opencode_session(
+    db_path: &Path,
+    id: &str,
+    directory: &Path,
+    parent_id: Option<&str>,
+) {
+    let parent = db_path
+        .parent()
+        .unwrap_or_else(|| panic!("OpenCode db path should have parent: {}", db_path.display()));
+    fs::create_dir_all(parent)
+        .unwrap_or_else(|error| panic!("Failed to create {}: {}", parent.display(), error));
+
+    let connection = Connection::open(db_path)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS session (
+                id TEXT PRIMARY KEY NOT NULL,
+                directory TEXT NOT NULL,
+                parent_id TEXT,
+                time_created INTEGER NOT NULL,
+                time_updated INTEGER NOT NULL
+            );
+            ",
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "Failed to initialize fake OpenCode schema in {}: {}",
+                db_path.display(),
+                error
+            )
+        });
+
+    connection
+        .execute(
+            "
+            INSERT INTO session (id, directory, parent_id, time_created, time_updated)
+            VALUES (?1, ?2, ?3, 1, 1)
+            ",
+            params![id, directory.display().to_string(), parent_id],
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "Failed to insert fake OpenCode session {} into {}: {}",
+                id,
+                db_path.display(),
+                error
+            )
+        });
 }
 
 pub fn update_saved_session_opencode_session_id(db_path: &Path, name: &str, session_id: &str) {
