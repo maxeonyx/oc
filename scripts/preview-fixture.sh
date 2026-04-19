@@ -7,6 +7,7 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 TMP_ROOT=${TMPDIR:-/tmp}
 FIXTURE_PATTERN="$TMP_ROOT/oc-test-fixture.*"
 PREVIEW_TMUX_PREFIX="oc2-preview-"
+LATEST_ENV_FILE="$TMP_ROOT/oc-fixture-env.sh"
 
 usage() {
   cat <<'EOF'
@@ -67,6 +68,12 @@ cleanup_existing_fixtures() {
   done
 }
 
+clear_latest_env_file() {
+  if [[ -f "$LATEST_ENV_FILE" ]]; then
+    rm -f "$LATEST_ENV_FILE"
+  fi
+}
+
 theme=
 declare -a oc_args=()
 
@@ -110,6 +117,8 @@ cleanup_current_fixture() {
 
   if [[ -n "$fixture_dir" ]] && [[ -d "$fixture_dir" ]]; then
     cleanup_one_fixture "$fixture_dir"
+  else
+    clear_latest_env_file
   fi
 
   exit "$exit_code"

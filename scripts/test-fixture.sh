@@ -10,6 +10,20 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 LATEST_POINTER="${TMPDIR:-/tmp}/oc-test-fixture-latest"
 LATEST_ENV_FILE="${TMPDIR:-/tmp}/oc-fixture-env.sh"
 
+with_fixture_env() {
+  local db_path=$1
+  local tmux_prefix=$2
+  local opencode_db=$3
+  local tool_path=$4
+  shift 4
+
+  OC_ALIASES_FILE="$db_path" \
+    OC_TMUX_PREFIX="$tmux_prefix" \
+    OC_OPENCODE_DB="$opencode_db" \
+    PATH="$tool_path" \
+    "$@"
+}
+
 usage() {
   cat <<EOF
 Usage:
@@ -94,11 +108,7 @@ register_alias() {
   local name=$6
   local dir=$7
 
-  OC_ALIASES_FILE="$db_path" \
-    OC_TMUX_PREFIX="$tmux_prefix" \
-    OC_OPENCODE_DB="$opencode_db" \
-    PATH="$tool_path" \
-    "$oc_bin" alias "$name" "$dir"
+  with_fixture_env "$db_path" "$tmux_prefix" "$opencode_db" "$tool_path" "$oc_bin" alias "$name" "$dir"
 }
 
 install_fake_opencode() {
@@ -160,6 +170,34 @@ spawn_attached_client() {
 
   nohup env TERM="${TERM:-screen}" python3 -c $'import os, pty, sys\npid, _ = pty.fork()\nif pid == 0:\n    os.execvp("tmux", ["tmux", "attach-session", "-t", sys.argv[1]])\n_, status = os.waitpid(pid, 0)\nraise SystemExit(os.waitstatus_to_exitcode(status))' "$session_name" >"$log_file" 2>&1 < /dev/null &
   printf '%s\n' "$!" >>"$pid_file"
+}
+
+kill_tmux_sessions_with_prefix() {
+  local tmux_prefix=$1
+  local attempt
+
+  for attempt in {1..5}; do
+    local found=0
+
+    while IFS= read -r session_name; do
+      [[ "$session_name" == "$tmux_prefix"* ]] || continue
+      found=1
+      tmux detach-client -s "$session_name" >/dev/null 2>&1 || true
+      tmux kill-session -t "$session_name" >/dev/null 2>&1 || true
+    done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+
+    if [[ $found -eq 0 ]]; then
+      return
+    fi
+
+    sleep 0.1
+  done
+
+  while IFS= read -r session_name; do
+    [[ "$session_name" == "$tmux_prefix"* ]] || continue
+    printf 'Failed to clean up tmux session: %s\n' "$session_name" >&2
+    exit 1
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
 }
 
 session_attached_count() {
@@ -285,11 +323,7 @@ launch_via_oc_new() {
   local pid_file=$9
 
   local log_file="$fixture_dir/${name}-oc-new.log"
-  OC_ALIASES_FILE="$db_path" \
-    OC_TMUX_PREFIX="$tmux_prefix" \
-    OC_OPENCODE_DB="$opencode_db" \
-    PATH="$tool_path" \
-    "$oc_bin" new "$name" "$directory" >"$log_file" 2>&1 &
+  with_fixture_env "$db_path" "$tmux_prefix" "$opencode_db" "$tool_path" "$oc_bin" new "$name" "$directory" >"$log_file" 2>&1 &
   local oc_pid=$!
   printf '%s\n' "$oc_pid" >>"$pid_file"
 
@@ -373,23 +407,13 @@ cleanup_fixture() {
   fi
 
   if [[ -n "${OC_TMUX_PREFIX:-}" ]]; then
-    while IFS= read -r session_name; do
-      [[ "$session_name" == "$OC_TMUX_PREFIX"* ]] || continue
-      tmux detach-client -s "$session_name" >/dev/null 2>&1 || true
-      tmux kill-session -t "$session_name" >/dev/null 2>&1 || true
-    done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+    kill_tmux_sessions_with_prefix "$OC_TMUX_PREFIX"
   fi
 
   rm -rf "$fixture_dir"
   if [[ -f "$LATEST_POINTER" ]] && [[ $(<"$LATEST_POINTER") == "$fixture_dir" ]]; then
     rm -f "$LATEST_POINTER"
-  fi
-  if [[ -f "$LATEST_ENV_FILE" ]]; then
-    # shellcheck disable=SC1090
-    source "$LATEST_ENV_FILE" || true
-    if [[ "${OC_TEST_FIXTURE_DIR:-}" == "$fixture_dir" ]]; then
-      rm -f "$LATEST_ENV_FILE"
-    fi
+    rm -f "$LATEST_ENV_FILE"
   fi
 
   printf 'Cleaned up fixture: %s\n' "$fixture_dir"
@@ -416,6 +440,7 @@ create_fixture() {
   fi
 
   local db_path="$fixture_dir/oc.db"
+  local opencode_db="$fixture_dir/opencode.sqlite"
   local fixture_root="$fixture_dir"
   mkdir -p \
     "$fixture_root/projects/alpha-01" \
@@ -445,20 +470,20 @@ create_fixture() {
   local ambiguous_name=ses-demo
   local ambiguous_dir="$fixture_root/projects/ses-demo"
 
-  register_alias "$oc_bin" "$db_path" "$tmux_prefix" "$fixture_dir/opencode.sqlite" "$tool_path" "$catchup_name" "$catchup_dir"
-  register_alias "$oc_bin" "$db_path" "$tmux_prefix" "$fixture_dir/opencode.sqlite" "$tool_path" "$ambiguous_name" "$ambiguous_dir"
+  register_alias "$oc_bin" "$db_path" "$tmux_prefix" "$opencode_db" "$tool_path" "$catchup_name" "$catchup_dir"
+  register_alias "$oc_bin" "$db_path" "$tmux_prefix" "$opencode_db" "$tool_path" "$ambiguous_name" "$ambiguous_dir"
 
-  launch_via_oc_new "$oc_bin" "$fixture_dir" "$db_path" "$tmux_prefix" "$fixture_dir/opencode.sqlite" "$tool_path" "$attached_name" "$attached_dir" "$pid_file"
+  launch_via_oc_new "$oc_bin" "$fixture_dir" "$db_path" "$tmux_prefix" "$opencode_db" "$tool_path" "$attached_name" "$attached_dir" "$pid_file"
   spawn_attached_client "$tmux_prefix$attached_name" "$pid_file" "$attached_log"
   wait_for_attached_client "$tmux_prefix$attached_name"
 
-  launch_via_oc_new "$oc_bin" "$fixture_dir" "$db_path" "$tmux_prefix" "$fixture_dir/opencode.sqlite" "$tool_path" "$detached_name" "$detached_dir" "$pid_file"
+  launch_via_oc_new "$oc_bin" "$fixture_dir" "$db_path" "$tmux_prefix" "$opencode_db" "$tool_path" "$detached_name" "$detached_dir" "$pid_file"
 
-  seed_opencode_session "$fixture_dir/opencode.sqlite" "$catchup_dir" 'ses_fixture_catchup_001'
-  seed_opencode_session "$fixture_dir/opencode.sqlite" "$ambiguous_dir" 'ses_fixture_ambiguous_001'
-  seed_opencode_session "$fixture_dir/opencode.sqlite" "$ambiguous_dir" 'ses_fixture_ambiguous_002'
+  seed_opencode_session "$opencode_db" "$catchup_dir" 'ses_fixture_catchup_001'
+  seed_opencode_session "$opencode_db" "$ambiguous_dir" 'ses_fixture_ambiguous_001'
+  seed_opencode_session "$opencode_db" "$ambiguous_dir" 'ses_fixture_ambiguous_002'
 
-  session_row_summary "$db_path" "$fixture_dir/opencode.sqlite" "$tmux_prefix" | tee "$dump_file"
+  session_row_summary "$db_path" "$opencode_db" "$tmux_prefix" | tee "$dump_file"
 
   cat <<EOF
 Created isolated oc fixture.
@@ -469,7 +494,7 @@ Fixture directory:
 The fixture uses:
   OC_ALIASES_FILE=$db_path
   OC_TMUX_PREFIX=$tmux_prefix
-  OC_OPENCODE_DB=$fixture_dir/opencode.sqlite
+  OC_OPENCODE_DB=$opencode_db
   PATH=$fake_bin_dir:\$PATH
 
 Sourceable env file:

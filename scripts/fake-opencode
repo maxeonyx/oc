@@ -7,35 +7,16 @@ mode=new
 session_id=
 declare -a forwarded_args=()
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --session)
-      if [[ $# -lt 2 ]]; then
-        printf '%s\n' 'fake-opencode expected a session ID after --session' >&2
-        exit 1
-      fi
-      mode=resume
-      session_id=$2
-      forwarded_args+=("$1" "$2")
-      shift 2
-      ;;
-    *)
-      forwarded_args+=("$1")
-      shift
-      ;;
-  esac
-done
-
-if [[ -z "$session_id" ]]; then
-  session_id=$(python3 - <<'PY'
+generate_session_id() {
+  python3 - <<'PY'
 import uuid
 
 print(f"ses_{uuid.uuid4().hex}")
 PY
-)
-fi
+}
 
-python3 - "$opencode_db" "$PWD" "$session_id" <<'PY'
+upsert_opencode_session() {
+  python3 - "$opencode_db" "$PWD" "$session_id" <<'PY'
 import sqlite3
 import sys
 import time
@@ -75,6 +56,44 @@ try:
 finally:
     connection.close()
 PY
+}
+
+print_screen() {
+  printf '%s\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+  printf '%s\n' 'Fake OpenCode preview session'
+  printf 'Session ID : %s\n' "$session_id"
+  printf 'Directory  : %s\n' "$PWD"
+  printf 'Mode       : %s\n' "$mode"
+  printf 'Args       : %s\n' "${forwarded_args[*]:-(none)}"
+  printf '%s\n' 'Detach with Ctrl-b d'
+  printf '%s\n' 'Ctrl-C stops this fake session'
+  printf '%s\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --session)
+      if [[ $# -lt 2 ]]; then
+        printf '%s\n' 'fake-opencode expected a session ID after --session' >&2
+        exit 1
+      fi
+      mode=resume
+      session_id=$2
+      forwarded_args+=("$1" "$2")
+      shift 2
+      ;;
+    *)
+      forwarded_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$session_id" ]]; then
+  session_id=$(generate_session_id)
+fi
+
+upsert_opencode_session
 
 cleanup() {
   printf '\nFake OpenCode exiting: %s\n' "$session_id"
@@ -83,15 +102,7 @@ cleanup() {
 
 trap cleanup INT TERM
 
-printf '%s\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
-printf '%s\n' 'Fake OpenCode preview session'
-printf 'Session ID : %s\n' "$session_id"
-printf 'Directory  : %s\n' "$PWD"
-printf 'Mode       : %s\n' "$mode"
-printf 'Args       : %s\n' "${forwarded_args[*]:-(none)}"
-printf '%s\n' 'Detach with Ctrl-b d'
-printf '%s\n' 'Ctrl-C stops this fake session'
-printf '%s\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+print_screen
 
 while IFS= read -r line; do
   printf 'Input      : %s\n' "$line"
