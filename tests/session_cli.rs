@@ -20,6 +20,13 @@ fn assert_saved_sessions(env: &TestEnv, expected_rows: Vec<SavedSessionRow>) {
     assert_eq!(read_saved_sessions(env.aliases_file()), expected_rows);
 }
 
+fn read_captured_session_id(fake_opencode: &FakeOpenCode) -> String {
+    fs::read_to_string(fake_opencode.session_id_log_path())
+        .expect("fake opencode session id log should be readable")
+        .trim()
+        .to_string()
+}
+
 fn saved_session_row_with_id(
     id: i64,
     name: &str,
@@ -93,10 +100,7 @@ fn new_creates_alias_launches_tmux_session_and_attaches() {
 
     run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "worktree"]);
     wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
-    let captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let captured_id = read_captured_session_id(&fake_opencode);
 
     assert_saved_sessions(
         &env,
@@ -140,10 +144,7 @@ fn new_uses_explicit_dir_and_args_when_launching_tmux_session() {
     );
 
     wait_for_file_exists(&fake_opencode.args_log_path(), Duration::from_secs(5));
-    let captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let captured_id = read_captured_session_id(&fake_opencode);
 
     assert_saved_sessions(
         &env,
@@ -197,10 +198,7 @@ fn new_rejects_duplicate_name_without_creating_second_tmux_session() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("already exists"));
-    let captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let captured_id = read_captured_session_id(&fake_opencode);
 
     assert_saved_sessions(
         &env,
@@ -233,17 +231,11 @@ fn rm_removes_alias_and_kills_running_tmux_session_by_numeric_id() {
 
     let session_one = managed_tmux_session_name(&env, "one");
     run_new_command_and_wait(&env, &fake_opencode, &session_one, &["new", "one"]);
-    let first_captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let first_captured_id = read_captured_session_id(&fake_opencode);
 
     let session_two = managed_tmux_session_name(&env, "two");
     run_new_command_and_wait(&env, &fake_opencode, &session_two, &["new", "two"]);
-    let second_captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let second_captured_id = read_captured_session_id(&fake_opencode);
 
     env.oc_cmd().args(["rm", "1"]).assert().success();
     env.wait_for_tmux_session_absent(&session_one);
@@ -278,10 +270,7 @@ fn stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias() {
     let env = TestEnv::new("stop-graceful-shutdown");
     let fake_opencode = env.install_fake_opencode();
     let session_name = launch_saved_session(&env, &fake_opencode, "dc");
-    let captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let captured_id = read_captured_session_id(&fake_opencode);
 
     env.oc_cmd().args(["stop", "dc"]).assert().success();
     env.wait_for_tmux_session_absent(&session_name);
@@ -316,10 +305,7 @@ fn stop_accepts_numeric_id() {
     let env = TestEnv::new("stop-by-id");
     let fake_opencode = env.install_fake_opencode();
     let session_name = launch_saved_session(&env, &fake_opencode, "dc");
-    let captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let captured_id = read_captured_session_id(&fake_opencode);
 
     env.oc_cmd().args(["stop", "1"]).assert().success();
     env.wait_for_tmux_session_absent(&session_name);
@@ -355,10 +341,7 @@ fn launch_detach_captures_session_id() {
     run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "dc"]);
     wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
 
-    let captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let captured_id = read_captured_session_id(&fake_opencode);
 
     assert_saved_sessions(
         &env,
@@ -385,10 +368,7 @@ fn restart_uses_captured_session_id() {
     run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "dc"]);
     wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
 
-    let captured_id = fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let captured_id = read_captured_session_id(&fake_opencode);
 
     let mut restart_command = env.oc_cmd();
     fake_opencode.apply_to_assert_cmd(&mut restart_command);

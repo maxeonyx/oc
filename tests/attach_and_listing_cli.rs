@@ -3,9 +3,9 @@ mod common;
 use common::{
     FakeOpenCode, SavedSessionRow, TestEnv, capture_tmux_pane, create_tmux_session_in_dir,
     detach_tmux_client_from_session, insert_opencode_session, read_saved_sessions,
-    saved_session_row, send_keys_to_tmux_session, spawn_tmux_attach_client,
-    tmux_session_attached_count, wait_for_file_exists, wait_for_tmux_client_detach_window,
-    wait_for_tmux_pane_contains, wait_for_tmux_session_attached,
+    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_session_attached_count,
+    wait_for_file_exists, wait_for_tmux_client_detach_window, wait_for_tmux_pane_contains,
+    wait_for_tmux_session_attached,
 };
 use predicates::prelude::*;
 use std::path::Path;
@@ -20,6 +20,13 @@ fn managed_tmux_session_name(env: &TestEnv, name: &str) -> String {
 
 fn assert_saved_sessions(env: &TestEnv, expected_rows: Vec<SavedSessionRow>) {
     assert_eq!(read_saved_sessions(env.aliases_file()), expected_rows);
+}
+
+fn read_captured_session_id(fake_opencode: &FakeOpenCode) -> String {
+    std::fs::read_to_string(fake_opencode.session_id_log_path())
+        .expect("fake opencode session id log should be readable")
+        .trim()
+        .to_string()
 }
 
 fn spawn_interactive_oc(
@@ -159,10 +166,7 @@ fn bare_target_launches_saved_alias_by_name_when_tmux_session_is_missing() {
         &["dc"],
         &session_name,
     );
-    let captured_id = std::fs::read_to_string(fake_opencode.session_id_log_path())
-        .expect("fake opencode session id log should be readable")
-        .trim()
-        .to_string();
+    let captured_id = read_captured_session_id(&fake_opencode);
     assert_saved_sessions(
         &env,
         vec![SavedSessionRow {
@@ -314,10 +318,12 @@ fn new_session_falls_back_to_dashboard_when_attach_fails() {
         "Expected dashboard fallback after new-session attach failure\npane:\n{pane}"
     );
     wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
-    assert_saved_sessions(
-        &env,
-        vec![saved_session_row(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
-    );
+    let saved_sessions = read_saved_sessions(env.aliases_file());
+    assert_eq!(saved_sessions.len(), 1);
+    assert_eq!(saved_sessions[0].id, 1);
+    assert_eq!(saved_sessions[0].name, "dc");
+    assert_eq!(saved_sessions[0].directory, env.root_dir());
+    assert_eq!(saved_sessions[0].opencode_args, EMPTY_ARGS_JSON);
 }
 
 fn assert_hidden_session_dump_status(env: &TestEnv, expected_status: &str) {

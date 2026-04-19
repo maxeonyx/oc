@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RootSessionIds {
+pub enum RootSessionIdLookup {
     Available(BTreeSet<String>),
     Unavailable,
 }
@@ -19,22 +19,15 @@ impl OpenCodeDb {
         Self { path: path.into() }
     }
 
-    pub fn root_session_ids_for_directory(&self, directory: &Path) -> Result<RootSessionIds> {
+    pub fn root_session_ids_for_directory(&self, directory: &Path) -> Result<RootSessionIdLookup> {
         if !self.path.exists() {
-            return Ok(RootSessionIds::Available(BTreeSet::new()));
+            return Ok(RootSessionIdLookup::Available(BTreeSet::new()));
         }
 
         let connection =
             match Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
                 Ok(connection) => connection,
-                Err(error) if is_unavailable_error(&error) => {
-                    return Ok(RootSessionIds::Unavailable);
-                }
-                Err(error) => {
-                    return Err(anyhow!(error)).with_context(|| {
-                        format!("failed to open OpenCode database {}", self.path.display())
-                    });
-                }
+                Err(error) => return self.handle_open_error(error),
             };
 
         let mut statement = match connection
@@ -42,9 +35,11 @@ impl OpenCodeDb {
         {
             Ok(statement) => statement,
             Err(error) if is_missing_session_table_error(&error) => {
-                return Ok(RootSessionIds::Available(BTreeSet::new()));
+                return Ok(RootSessionIdLookup::Available(BTreeSet::new()));
             }
-            Err(error) if is_unavailable_error(&error) => return Ok(RootSessionIds::Unavailable),
+            Err(error) if is_unavailable_error(&error) => {
+                return Ok(RootSessionIdLookup::Unavailable);
+            }
             Err(error) => {
                 return Err(anyhow!(error)).with_context(|| {
                     format!(
@@ -59,7 +54,9 @@ impl OpenCodeDb {
             row.get::<_, String>(0)
         }) {
             Ok(rows) => rows,
-            Err(error) if is_unavailable_error(&error) => return Ok(RootSessionIds::Unavailable),
+            Err(error) if is_unavailable_error(&error) => {
+                return Ok(RootSessionIdLookup::Unavailable);
+            }
             Err(error) => {
                 return Err(anyhow!(error)).with_context(|| {
                     format!(
@@ -80,7 +77,16 @@ impl OpenCodeDb {
             })?);
         }
 
-        Ok(RootSessionIds::Available(ids))
+        Ok(RootSessionIdLookup::Available(ids))
+    }
+
+    fn handle_open_error(&self, error: rusqlite::Error) -> Result<RootSessionIdLookup> {
+        if is_unavailable_error(&error) {
+            return Ok(RootSessionIdLookup::Unavailable);
+        }
+
+        Err(anyhow!(error))
+            .with_context(|| format!("failed to open OpenCode database {}", self.path.display()))
     }
 }
 

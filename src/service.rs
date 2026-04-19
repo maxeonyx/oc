@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::RuntimeConfig;
-use crate::opencode_db::{OpenCodeDb, RootSessionIds};
+use crate::opencode_db::{OpenCodeDb, RootSessionIdLookup};
 use crate::session::{NewSessionAlias, SavedSession, SessionListEntry, SessionRef};
 use crate::session_list::merge_saved_and_runtime_sessions_with_prefix;
 use crate::storage::SessionStore;
@@ -137,7 +137,7 @@ impl SessionService {
 
     pub fn restart_session(&self, target: &str) -> Result<()> {
         let saved_session = self.resolve_session_ref(target)?;
-        let _opencode_session_id = saved_session.opencode_session_id.as_ref().ok_or_else(|| {
+        saved_session.opencode_session_id.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
                 "Session '{}' cannot be restarted because it has no saved OpenCode session ID",
                 saved_session.name
@@ -293,8 +293,8 @@ impl SessionService {
             .open_opencode_db()
             .root_session_ids_for_directory(&saved_session.directory)?
         {
-            RootSessionIds::Available(ids) => Ok(Some(ids)),
-            RootSessionIds::Unavailable => Ok(None),
+            RootSessionIdLookup::Available(ids) => Ok(Some(ids)),
+            RootSessionIdLookup::Unavailable => Ok(None),
         }
     }
 
@@ -308,7 +308,7 @@ impl SessionService {
             return Ok(());
         };
 
-        let RootSessionIds::Available(after_launch_ids) = self
+        let RootSessionIdLookup::Available(after_launch_ids) = self
             .open_opencode_db()
             .root_session_ids_for_directory(&saved_session.directory)?
         else {
@@ -343,7 +343,7 @@ impl SessionService {
                 continue;
             }
 
-            let RootSessionIds::Available(ids) =
+            let RootSessionIdLookup::Available(ids) =
                 opencode_db.root_session_ids_for_directory(&saved_session.directory)?
             else {
                 continue;
