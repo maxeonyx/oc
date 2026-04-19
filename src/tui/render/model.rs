@@ -50,8 +50,11 @@ pub struct RenderModel {
 }
 
 pub struct SessionTable {
-    all_rows: Vec<RowSpec>,
+    header: RowSpec,
+    body_rows: Vec<RowSpec>,
+    footer_rows: Vec<RowSpec>,
     body_scroll: usize,
+    body_fill_style: Style,
 }
 
 #[derive(Clone, Debug)]
@@ -121,44 +124,56 @@ impl SessionTable {
         content_width: usize,
         theme: &Theme,
     ) -> Self {
-        let all_rows = session_rows(state, widths, content_width, theme);
-        let footer_start = all_rows.len().saturating_sub(SESSION_FOOTER_LINES);
-        let body_line_count = footer_start.saturating_sub(1);
+        let sections = session_rows(state, widths, content_width, theme);
         let selected_body_index = selected_body_line_index(state);
 
         Self {
-            body_scroll: selected_body_index.min(body_line_count.saturating_sub(1)),
-            all_rows,
+            body_scroll: selected_body_index.min(sections.body_rows.len().saturating_sub(1)),
+            header: sections.header,
+            body_rows: sections.body_rows,
+            footer_rows: sections.footer_rows,
+            body_fill_style: Style::default().bg(theme.panel_bg),
         }
     }
 
     pub fn visible_lines(&self, width: u16, max_lines: usize) -> Vec<Line<'static>> {
-        if self.all_rows.len() <= max_lines {
-            return self.all_rows.iter().map(|row| row.render(width)).collect();
+        if max_lines == 0 {
+            return Vec::new();
         }
 
-        let footer_start = self.all_rows.len().saturating_sub(SESSION_FOOTER_LINES);
-        let header = self.all_rows[0].render(width);
-        let footer = self.all_rows[footer_start..]
+        let header = self.header.render(width);
+        let footer = self
+            .footer_rows
             .iter()
             .map(|row| row.render(width))
             .collect::<Vec<_>>();
-        let body = &self.all_rows[1..footer_start];
         let body_space = max_lines.saturating_sub(SESSION_HEADER_LINES + SESSION_FOOTER_LINES);
-        let max_scroll = body.len().saturating_sub(body_space);
+        let max_scroll = self.body_rows.len().saturating_sub(body_space);
         let scroll = self.body_scroll.min(max_scroll);
-        let visible_body = body
+        let visible_body = self
+            .body_rows
             .iter()
             .skip(scroll)
             .take(body_space)
             .map(|row| row.render(width))
             .collect::<Vec<_>>();
+        let filler_rows =
+            std::iter::repeat_with(|| RowSpec::blank(self.body_fill_style).render(width))
+                .take(body_space.saturating_sub(visible_body.len()))
+                .collect::<Vec<_>>();
 
         std::iter::once(header)
             .chain(visible_body)
+            .chain(filler_rows)
             .chain(footer)
             .collect()
     }
+}
+
+struct SessionTableRows {
+    header: RowSpec,
+    body_rows: Vec<RowSpec>,
+    footer_rows: Vec<RowSpec>,
 }
 
 impl RowSpec {
@@ -168,6 +183,10 @@ impl RowSpec {
 
     fn single(text: impl Into<String>, style: Style) -> Self {
         Self::new(style, vec![StyledRun::new(text, style)])
+    }
+
+    fn blank(fill_style: Style) -> Self {
+        Self::new(fill_style, Vec::new())
     }
 
     pub(crate) fn render(&self, width: u16) -> Line<'static> {
@@ -513,20 +532,19 @@ fn session_rows(
     widths: &ColumnWidths,
     content_width: usize,
     theme: &Theme,
-) -> Vec<RowSpec> {
+) -> SessionTableRows {
     let header_text = format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", widths);
-    let mut rows = vec![RowSpec::single(
+    let header = RowSpec::single(
         header_text,
         Style::default()
             .fg(theme.accent)
             .bg(theme.panel_bg)
             .add_modifier(Modifier::BOLD),
-    )];
+    );
 
     let session_count = state.view.sessions().count();
     let mut body_rows = Vec::with_capacity(session_count + RESERVED_GROUP_SLOT_LINES);
     let mut session_index = 0;
-    let mut group_slots = 0;
 
     for group in &state.view.groups {
         append_group_rows(
@@ -535,35 +553,34 @@ fn session_rows(
             widths,
             state.selected_index,
             &mut session_index,
-            &mut group_slots,
             content_width,
             theme,
         );
     }
 
-    while group_slots < RESERVED_GROUP_SLOT_LINES {
-        body_rows.push(RowSpec::single("", Style::default().bg(theme.panel_bg)));
-        group_slots += 1;
-    }
-
-    rows.extend(body_rows);
-
-    rows.push(RowSpec::single("", Style::default().bg(theme.panel_bg)));
-    rows.push(RowSpec::single(
-        format_column_row(
-            &state.view.totals.filtered_sessions.to_string(),
-            "total sessions",
-            &state.view.totals.filtered_running.to_string(),
-            &format_memory(state.view.totals.filtered_memory_bytes),
-            state.totals_scope_label(),
-            widths,
+    let footer_rows = vec![
+        RowSpec::blank(Style::default().bg(theme.panel_bg)),
+        RowSpec::single(
+            format_column_row(
+                &state.view.totals.filtered_sessions.to_string(),
+                "total sessions",
+                &state.view.totals.filtered_running.to_string(),
+                &format_memory(state.view.totals.filtered_memory_bytes),
+                state.totals_scope_label(),
+                widths,
+            ),
+            Style::default()
+                .fg(theme.totals_text)
+                .bg(theme.panel_bg)
+                .add_modifier(Modifier::BOLD),
         ),
-        Style::default()
-            .fg(theme.totals_text)
-            .bg(theme.panel_bg)
-            .add_modifier(Modifier::BOLD),
-    ));
-    rows
+    ];
+
+    SessionTableRows {
+        header,
+        body_rows,
+        footer_rows,
+    }
 }
 
 fn append_group_rows(
@@ -572,7 +589,6 @@ fn append_group_rows(
     widths: &ColumnWidths,
     selected_index: usize,
     session_index: &mut usize,
-    group_slots: &mut usize,
     content_width: usize,
     theme: &Theme,
 ) {
@@ -584,7 +600,6 @@ fn append_group_rows(
                 .bg(theme.panel_bg)
                 .add_modifier(Modifier::DIM),
         ));
-        *group_slots += 1;
     }
 
     for row in &group.sessions {

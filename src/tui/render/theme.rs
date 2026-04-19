@@ -13,6 +13,9 @@ const MIN_BUTTON_CONTRAST: f32 = 1.08;
 const MIN_SELECTION_CONTRAST: f32 = 1.35;
 const MIN_MUTED_CONTRAST: f32 = 2.4;
 const MIN_DISABLED_CONTRAST: f32 = 1.8;
+const GROUP_HEADER_TARGET_MIN_CONTRAST: f32 = 1.08;
+const GROUP_HEADER_TARGET_MAX_CONTRAST: f32 = 1.12;
+const GROUP_HEADER_HARD_MAX_CONTRAST: f32 = 1.15;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
@@ -85,7 +88,7 @@ fn build_theme(mode: ThemeMode, background: RgbColor, foreground: RgbColor) -> T
     let disabled_button_bg = mix(panel_bg, button_bg, 0.22);
     let selection_bg = derive_surface(background, mode, 0.18, 0.7, MIN_SELECTION_CONTRAST);
     let muted_text = derive_subdued_text(panel_bg, foreground, MIN_MUTED_CONTRAST, 0.48);
-    let group_header_text = derive_subdued_text(panel_bg, foreground, 1.05, 0.04);
+    let group_header_text = derive_group_header_text(panel_bg, foreground);
     let disabled_text = derive_subdued_text(button_bg, foreground, MIN_DISABLED_CONTRAST, 0.28);
     let selection_text = best_text_color(selection_bg, foreground, background);
     let (action_attach_bg, action_attach_text) =
@@ -260,6 +263,43 @@ fn derive_subdued_text(
     }
 
     candidate
+}
+
+fn derive_group_header_text(background: RgbColor, foreground: RgbColor) -> RgbColor {
+    let mut best_under_cap = None;
+    let mut first_above_min = None;
+    let mut fallback = mix(background, foreground, 0.0);
+    let mut foreground_weight = 0.0;
+
+    while foreground_weight <= 1.0 {
+        let candidate = mix(background, foreground, foreground_weight);
+        let contrast = contrast_ratio(candidate, background);
+
+        if contrast <= GROUP_HEADER_HARD_MAX_CONTRAST {
+            best_under_cap = Some((candidate, contrast));
+        }
+        if contrast >= GROUP_HEADER_TARGET_MIN_CONTRAST {
+            first_above_min = Some((candidate, contrast));
+            break;
+        }
+
+        fallback = candidate;
+        foreground_weight += 0.01;
+    }
+
+    if let Some((candidate, contrast)) = first_above_min {
+        if contrast <= GROUP_HEADER_TARGET_MAX_CONTRAST {
+            return candidate;
+        }
+    }
+
+    if let Some((candidate, contrast)) = best_under_cap {
+        if contrast >= GROUP_HEADER_TARGET_MIN_CONTRAST {
+            return candidate;
+        }
+    }
+
+    fallback
 }
 
 fn best_text_color(
