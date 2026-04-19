@@ -159,9 +159,19 @@ fn bare_target_launches_saved_alias_by_name_when_tmux_session_is_missing() {
         &["dc"],
         &session_name,
     );
+    let captured_id = std::fs::read_to_string(fake_opencode.session_id_log_path())
+        .expect("fake opencode session id log should be readable")
+        .trim()
+        .to_string();
     assert_saved_sessions(
         &env,
-        vec![saved_session_row(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
+        vec![SavedSessionRow {
+            id: 1,
+            name: String::from("dc"),
+            directory: env.root_dir().to_path_buf(),
+            opencode_session_id: Some(captured_id),
+            opencode_args: String::from(EMPTY_ARGS_JSON),
+        }],
     );
 }
 

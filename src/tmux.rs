@@ -123,7 +123,7 @@ impl Tmux {
         wait_for_session_exit(session_name, std::time::Duration::from_secs(10))?;
 
         self.launch_opencode_session(session_name, directory, opencode_args)?;
-        std::thread::sleep(std::time::Duration::from_secs(10));
+        wait_for_pane(session_name, std::time::Duration::from_secs(10))?;
         self.send_keys(session_name, &["continue", "Enter"])?;
 
         Ok(())
@@ -241,6 +241,25 @@ fn wait_for_session_exit(session_name: &str, timeout: std::time::Duration) -> Re
     }
 
     bail!("Session '{session_name}' did not stop before restart timeout")
+}
+
+fn wait_for_pane(session_name: &str, timeout: std::time::Duration) -> Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+
+    while std::time::Instant::now() < deadline {
+        let output = Command::new("tmux")
+            .args(["display-message", "-p", "-t", session_name, "#{pane_id}"])
+            .output()
+            .with_context(|| format!("failed to wait for tmux pane in session '{session_name}'"))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    bail!("Session '{session_name}' did not expose a pane before restart timeout")
 }
 
 fn current_environment_args() -> Vec<OsString> {

@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::RuntimeConfig;
+use crate::opencode_db::{OpenCodeDb, RootSessionIds};
 use crate::session::{NewSessionAlias, SavedSession, SessionListEntry, SessionRef};
 use crate::session_list::merge_saved_and_runtime_sessions_with_prefix;
 use crate::storage::SessionStore;
@@ -69,7 +71,8 @@ impl SessionService {
     }
 
     pub fn list_dashboard_sessions(&self) -> Result<Vec<SessionListEntry>> {
-        let store = self.open_session_store()?;
+        let mut store = self.open_session_store()?;
+        self.catch_up_missing_session_ids(&mut store)?;
         let saved_sessions = store.list_saved_sessions()?;
         let tmux = self.open_tmux();
         let runtimes = tmux.list_managed_sessions()?;
@@ -97,9 +100,8 @@ impl SessionService {
 
     pub fn activate_session(&self, saved_session: &SavedSession) -> Result<()> {
         let tmux = self.open_tmux();
-        let launch = SessionLaunch::for_saved_session(&tmux, saved_session);
-        self.ensure_tmux_session_running(&tmux, &launch)?;
-        self.attach_to_session(&tmux, &launch)
+        let mut store = self.open_session_store()?;
+        self.activate_saved_session(&tmux, &mut store, saved_session)
     }
 
     pub fn stop_session(&self, target: &str) -> Result<()> {
@@ -220,6 +222,10 @@ impl SessionService {
         Tmux::new(self.config.tmux_prefix())
     }
 
+    fn open_opencode_db(&self) -> OpenCodeDb {
+        OpenCodeDb::new(self.config.opencode_db_path())
+    }
+
     fn activate_new_saved_session(
         &self,
         tmux: &Tmux,
@@ -227,15 +233,35 @@ impl SessionService {
         saved_session: SavedSession,
     ) -> Result<()> {
         let launch = SessionLaunch::for_saved_session(tmux, &saved_session);
+        let before_launch_ids = self.root_session_ids_before_launch(&saved_session)?;
 
         if let Err(error) = self.ensure_tmux_session_running(tmux, &launch) {
             rollback_saved_session(store, &saved_session.name, error)?;
         }
 
-        self.attach_to_session(tmux, &launch)
+        self.attach_to_session(tmux, &launch)?;
+        self.capture_session_id_after_attach(store, &saved_session, before_launch_ids)
     }
 
-    fn ensure_tmux_session_running(&self, tmux: &Tmux, launch: &SessionLaunch) -> Result<()> {
+    fn activate_saved_session(
+        &self,
+        tmux: &Tmux,
+        store: &mut SessionStore,
+        saved_session: &SavedSession,
+    ) -> Result<()> {
+        let launch = SessionLaunch::for_saved_session(tmux, saved_session);
+        let before_launch_ids = self.root_session_ids_before_launch(saved_session)?;
+        let launched = self.ensure_tmux_session_running(tmux, &launch)?;
+        self.attach_to_session(tmux, &launch)?;
+
+        if launched {
+            self.capture_session_id_after_attach(store, saved_session, before_launch_ids)?;
+        }
+
+        Ok(())
+    }
+
+    fn ensure_tmux_session_running(&self, tmux: &Tmux, launch: &SessionLaunch) -> Result<bool> {
         if !tmux.session_exists(&launch.tmux_session_name)? {
             tmux.launch_opencode_session(
                 &launch.tmux_session_name,
@@ -243,14 +269,99 @@ impl SessionService {
                 &launch.opencode_args,
             )
             .with_context(|| format!("failed to launch session '{}'", launch.session_name))?;
+
+            return Ok(true);
         }
 
-        Ok(())
+        Ok(false)
     }
 
     fn attach_to_session(&self, tmux: &Tmux, launch: &SessionLaunch) -> Result<()> {
         tmux.attach_session(&launch.tmux_session_name)
             .with_context(|| format!("failed to attach to session '{}'", launch.session_name))
+    }
+
+    fn root_session_ids_before_launch(
+        &self,
+        saved_session: &SavedSession,
+    ) -> Result<Option<BTreeSet<String>>> {
+        if saved_session.opencode_session_id.is_some() {
+            return Ok(None);
+        }
+
+        match self
+            .open_opencode_db()
+            .root_session_ids_for_directory(&saved_session.directory)?
+        {
+            RootSessionIds::Available(ids) => Ok(Some(ids)),
+            RootSessionIds::Unavailable => Ok(None),
+        }
+    }
+
+    fn capture_session_id_after_attach(
+        &self,
+        store: &mut SessionStore,
+        saved_session: &SavedSession,
+        before_launch_ids: Option<BTreeSet<String>>,
+    ) -> Result<()> {
+        let Some(before_launch_ids) = before_launch_ids else {
+            return Ok(());
+        };
+
+        let RootSessionIds::Available(after_launch_ids) = self
+            .open_opencode_db()
+            .root_session_ids_for_directory(&saved_session.directory)?
+        else {
+            return Ok(());
+        };
+
+        let new_ids = after_launch_ids
+            .difference(&before_launch_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if let [captured_id] = new_ids.as_slice() {
+            store
+                .update_opencode_session_id(&saved_session.name, Some(captured_id))
+                .with_context(|| {
+                    format!(
+                        "failed to persist captured OpenCode session ID for session '{}'",
+                        saved_session.name
+                    )
+                })?;
+        }
+
+        Ok(())
+    }
+
+    fn catch_up_missing_session_ids(&self, store: &mut SessionStore) -> Result<()> {
+        let saved_sessions = store.list_saved_sessions()?;
+        let opencode_db = self.open_opencode_db();
+
+        for saved_session in saved_sessions {
+            if saved_session.opencode_session_id.is_some() {
+                continue;
+            }
+
+            let RootSessionIds::Available(ids) =
+                opencode_db.root_session_ids_for_directory(&saved_session.directory)?
+            else {
+                continue;
+            };
+
+            if let [captured_id] = ids.iter().collect::<Vec<_>>().as_slice() {
+                store
+                    .update_opencode_session_id(&saved_session.name, Some(captured_id.as_str()))
+                    .with_context(|| {
+                        format!(
+                            "failed to catch up OpenCode session ID for session '{}'",
+                            saved_session.name
+                        )
+                    })?;
+            }
+        }
+
+        Ok(())
     }
 }
 
