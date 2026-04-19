@@ -15,7 +15,7 @@ use crate::tui::types::{
 };
 
 const MIN_CONTENT_WIDTH: u16 = 40;
-const RESERVED_GROUP_SLOT_LINES: usize = 4;
+const RESERVED_GROUP_HEADER_LINES: usize = 4;
 const SESSION_FOOTER_LINES: usize = 2;
 const SESSION_HEADER_LINES: usize = 1;
 const BUTTON_MIN_WIDTH: usize = 8;
@@ -54,7 +54,6 @@ pub struct SessionTable {
     body_rows: Vec<RowSpec>,
     footer_rows: Vec<RowSpec>,
     body_scroll: usize,
-    body_fill_style: Style,
 }
 
 #[derive(Clone, Debug)]
@@ -132,7 +131,6 @@ impl SessionTable {
             header: sections.header,
             body_rows: sections.body_rows,
             footer_rows: sections.footer_rows,
-            body_fill_style: Style::default().bg(theme.panel_bg),
         }
     }
 
@@ -157,10 +155,10 @@ impl SessionTable {
             .take(body_space)
             .map(|row| row.render(width))
             .collect::<Vec<_>>();
-        let filler_rows =
-            std::iter::repeat_with(|| RowSpec::blank(self.body_fill_style).render(width))
-                .take(body_space.saturating_sub(visible_body.len()))
-                .collect::<Vec<_>>();
+        let filler_template = self.footer_rows.first().unwrap_or(&self.header);
+        let filler_rows = std::iter::repeat_with(|| filler_template.render(width))
+            .take(body_space.saturating_sub(visible_body.len()))
+            .collect::<Vec<_>>();
 
         std::iter::once(header)
             .chain(visible_body)
@@ -524,7 +522,7 @@ fn session_list_content_height(session_count: usize) -> u16 {
 }
 
 fn stable_list_content_height(session_count: usize) -> u16 {
-    session_list_content_height(session_count).saturating_add(RESERVED_GROUP_SLOT_LINES as u16)
+    session_list_content_height(session_count).saturating_add(RESERVED_GROUP_HEADER_LINES as u16)
 }
 
 fn session_rows(
@@ -543,7 +541,7 @@ fn session_rows(
     );
 
     let session_count = state.view.sessions().count();
-    let mut body_rows = Vec::with_capacity(session_count + RESERVED_GROUP_SLOT_LINES);
+    let mut body_rows = Vec::with_capacity(session_count + RESERVED_GROUP_HEADER_LINES);
     let mut session_index = 0;
 
     for group in &state.view.groups {

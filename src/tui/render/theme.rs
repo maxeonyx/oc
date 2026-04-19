@@ -431,11 +431,11 @@ impl From<terminal_colorsaurus::Color> for RgbColor {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_theme, contrast_ratio, RgbColor, ThemeMode};
+    use super::{
+        build_theme, contrast_ratio, RgbColor, ThemeMode, GROUP_HEADER_HARD_MAX_CONTRAST,
+        GROUP_HEADER_TARGET_MIN_CONTRAST,
+    };
     use ratatui::style::Color;
-
-    const GROUP_HEADER_TARGET_MIN_CONTRAST: f32 = 1.08;
-    const GROUP_HEADER_HARD_MAX_CONTRAST: f32 = 1.15;
 
     #[test]
     fn group_header_contrast_stays_within_bound_for_representative_palettes() {
