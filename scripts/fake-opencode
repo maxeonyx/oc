@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+opencode_db=${OC_OPENCODE_DB:?}
+mode=new
+session_id=
+declare -a forwarded_args=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --session)
+      if [[ $# -lt 2 ]]; then
+        printf '%s\n' 'fake-opencode expected a session ID after --session' >&2
+        exit 1
+      fi
+      mode=resume
+      session_id=$2
+      forwarded_args+=("$1" "$2")
+      shift 2
+      ;;
+    *)
+      forwarded_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$session_id" ]]; then
+  session_id=$(python3 - <<'PY'
+import uuid
+
+print(f"ses_{uuid.uuid4().hex}")
+PY
+)
+fi
+
+python3 - "$opencode_db" "$PWD" "$session_id" <<'PY'
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+db_path = Path(sys.argv[1])
+directory = sys.argv[2]
+session_id = sys.argv[3]
+
+db_path.parent.mkdir(parents=True, exist_ok=True)
+connection = sqlite3.connect(db_path)
+try:
+    connection.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS session (
+            id TEXT PRIMARY KEY NOT NULL,
+            directory TEXT NOT NULL,
+            parent_id TEXT,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL
+        )
+        '''
+    )
+    now = int(time.time())
+    connection.execute(
+        '''
+        INSERT INTO session (id, directory, parent_id, time_created, time_updated)
+        VALUES (?, ?, NULL, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            directory = excluded.directory,
+            parent_id = excluded.parent_id,
+            time_updated = excluded.time_updated
+        ''',
+        (session_id, directory, now, now),
+    )
+    connection.commit()
+finally:
+    connection.close()
+PY
+
+cleanup() {
+  printf '\nFake OpenCode exiting: %s\n' "$session_id"
+  exit 0
+}
+
+trap cleanup INT TERM
+
+printf '%s\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+printf '%s\n' 'Fake OpenCode preview session'
+printf 'Session ID : %s\n' "$session_id"
+printf 'Directory  : %s\n' "$PWD"
+printf 'Mode       : %s\n' "$mode"
+printf 'Args       : %s\n' "${forwarded_args[*]:-(none)}"
+printf '%s\n' 'Detach with Ctrl-b d'
+printf '%s\n' 'Ctrl-C stops this fake session'
+printf '%s\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+
+while IFS= read -r line; do
+  printf 'Input      : %s\n' "$line"
+done
+
+cleanup
