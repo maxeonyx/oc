@@ -48,6 +48,15 @@ fn auto_attach_result(service: &SessionService) -> Result<AutoAttachResult> {
     }
 }
 
+pub fn interactive_attach_failure_summary(action: &RequestedAction) -> Option<String> {
+    match action {
+        RequestedAction::AttachTarget { target } => Some(format!("Attach failed for {target}")),
+        RequestedAction::New { name, .. } => Some(format!("Attach failed for {name}")),
+        RequestedAction::Move { target, .. } => Some(format!("Attach failed for {target}")),
+        _ => None,
+    }
+}
+
 pub fn interactive_attach_failure_status(
     action: &RequestedAction,
     error: &anyhow::Error,
@@ -56,16 +65,7 @@ pub fn interactive_attach_failure_status(
         return None;
     }
 
-    match action {
-        RequestedAction::AttachTarget { target } => {
-            Some(format!("Attach failed for {target}: {error:#}"))
-        }
-        RequestedAction::New { name, .. } => Some(format!("Attach failed for {name}: {error:#}")),
-        RequestedAction::Move { target, .. } => {
-            Some(format!("Attach failed for {target}: {error:#}"))
-        }
-        _ => None,
-    }
+    interactive_attach_failure_summary(action).map(|summary| format!("{summary}: {error:#}"))
 }
 
 fn is_attach_failure(error: &anyhow::Error) -> bool {

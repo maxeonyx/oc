@@ -524,13 +524,8 @@ fn run_interactive_action(
 
     let status_message = match action_result {
         Ok(()) => None,
-        Err(error) => {
-            if commands::interactive_attach_failure_status(&action, &error).is_some() {
-                Some(short_interactive_action_error(&action))
-            } else {
-                Some(error.to_string())
-            }
-        }
+        Err(error) => commands::interactive_attach_failure_summary(&action)
+            .or_else(|| Some(error.to_string())),
     };
 
     resume_result?;
@@ -546,13 +541,4 @@ fn run_interactive_action(
     )?;
 
     Ok(())
-}
-
-fn short_interactive_action_error(action: &RequestedAction) -> String {
-    match action {
-        RequestedAction::AttachTarget { target } => format!("Attach failed for {target}"),
-        RequestedAction::New { name, .. } => format!("Attach failed for {name}"),
-        RequestedAction::Move { target, .. } => format!("Attach failed for {target}"),
-        _ => String::from("Attach failed"),
-    }
 }
