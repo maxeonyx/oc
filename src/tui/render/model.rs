@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use crate::session::SessionStatus;
 
 use super::theme::Theme;
-use crate::tui::format::{centered_rule, format_column_row, format_memory, ColumnWidths};
+use crate::tui::format::{format_column_row, format_memory, ColumnWidths};
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
     ActionState, CursorPosition, DashboardAction, DashboardGroup, DashboardRow, DashboardSnapshot,
@@ -591,12 +591,7 @@ fn append_group_rows(
     theme: &Theme,
 ) {
     if let Some(title) = &group.title {
-        rows.push(RowSpec::single(
-            centered_rule(title, content_width, '─'),
-            Style::default()
-                .fg(theme.group_header_text)
-                .bg(theme.panel_bg),
-        ));
+        rows.push(group_header_row(title, content_width, theme));
     }
 
     for row in &group.sessions {
@@ -613,6 +608,32 @@ fn append_group_rows(
         ));
         *session_index += 1;
     }
+}
+
+fn group_header_row(title: &str, content_width: usize, theme: &Theme) -> RowSpec {
+    let rule_style = Style::default()
+        .fg(theme.group_header_text)
+        .bg(theme.panel_bg);
+    let label_style = Style::default().fg(theme.muted_text).bg(theme.panel_bg);
+    let label = format!(" {title} ");
+    let label_width = display_width(&label);
+
+    if label_width >= content_width {
+        return RowSpec::single(title, label_style);
+    }
+
+    let total_fill = content_width.saturating_sub(label_width);
+    let left_fill = total_fill / 2;
+    let right_fill = total_fill.saturating_sub(left_fill);
+
+    RowSpec::new(
+        rule_style,
+        vec![
+            StyledRun::new("─".repeat(left_fill), rule_style),
+            StyledRun::new(label, label_style),
+            StyledRun::new("─".repeat(right_fill), rule_style),
+        ],
+    )
 }
 
 fn row_style(selected: bool, row: &DashboardRow, theme: &Theme) -> Style {
