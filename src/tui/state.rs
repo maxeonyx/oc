@@ -1,27 +1,28 @@
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::cli::RequestedAction;
 use crate::commands;
 use crate::service::SessionService;
 
-use super::command::{parse_command, CommandParseError};
+use super::command::{CommandParseError, parse_command};
 use super::filter::{build_view, summary_for_view, totals_scope_label};
-use super::input::{map_key_event, InputIntent};
+use super::input::{InputIntent, map_key_event};
 use super::render;
 use super::render::Theme;
 use super::selection::{
-    available_actions, cycle_action_for_row, default_selected_identity,
-    index_for_selected_identity, preferred_action_for_row, selected_identity_at, SelectedSession,
+    SelectedSession, available_actions, cycle_action_for_row, default_selected_identity,
+    index_for_selected_identity, preferred_action_for_row, selected_identity_at,
 };
 use super::types::{
     DashboardAction, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,
@@ -71,8 +72,13 @@ pub fn run(service: &SessionService, status_message: Option<String>) -> Result<(
             match event::read()? {
                 Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                     let command_mode = state.input_mode == InputMode::Command;
-                    if handle_input(service, &mut state, map_key_event(key_event, command_mode))? {
-                        return Ok(());
+                    match handle_input(service, &mut state, map_key_event(key_event, command_mode))?
+                    {
+                        DashboardLoopAction::Continue => {}
+                        DashboardLoopAction::Exit => return Ok(()),
+                        DashboardLoopAction::RunInteractiveAction(action) => {
+                            run_interactive_action(service, &mut state, &mut terminal, action)?;
+                        }
                     }
                     last_refresh = Instant::now();
                 }
@@ -92,7 +98,7 @@ fn handle_input(
     service: &SessionService,
     state: &mut DashboardState,
     intent: InputIntent,
-) -> Result<bool> {
+) -> Result<DashboardLoopAction> {
     match intent {
         InputIntent::ClearInput => state.clear_input(service)?,
         InputIntent::Quit => return state.handle_quit(service),
@@ -100,7 +106,7 @@ fn handle_input(
         InputIntent::MoveDown => state.move_selection_down(),
         InputIntent::CycleLeft => state.cycle_action(-1),
         InputIntent::CycleRight => state.cycle_action(1),
-        InputIntent::Submit => state.execute_enter(service)?,
+        InputIntent::Submit => return state.execute_enter(service),
         InputIntent::Backspace => state.handle_backspace(service)?,
         InputIntent::EnterCommandMode => state.enter_command_mode(),
         InputIntent::InsertChar(character) => {
@@ -113,7 +119,13 @@ fn handle_input(
         InputIntent::Ignore => {}
     }
 
-    Ok(false)
+    Ok(DashboardLoopAction::Continue)
+}
+
+enum DashboardLoopAction {
+    Continue,
+    Exit,
+    RunInteractiveAction(RequestedAction),
 }
 
 impl DashboardState {
@@ -219,16 +231,16 @@ impl DashboardState {
         Ok(())
     }
 
-    pub fn execute_enter(&mut self, service: &SessionService) -> Result<()> {
+    fn execute_enter(&mut self, service: &SessionService) -> Result<DashboardLoopAction> {
         if self.input_mode == InputMode::Command {
             return self.execute_command(service);
         }
 
         if let Some(row) = self.selected_row() {
-            self.execute_action(service, row.session_id)?;
+            return self.execute_action(service, row.name.clone());
         }
 
-        Ok(())
+        Ok(DashboardLoopAction::Continue)
     }
 
     pub fn available_actions(&self) -> Vec<DashboardAction> {
@@ -260,40 +272,58 @@ impl DashboardState {
         self.input_mode == InputMode::Filter && !self.input_text.is_empty()
     }
 
-    fn execute_command(&mut self, service: &SessionService) -> Result<()> {
+    fn execute_command(&mut self, service: &SessionService) -> Result<DashboardLoopAction> {
         let selected_identity = self.selected_session();
         match parse_command(&self.input_text) {
-            Ok(command) => {
-                commands::run_requested_action(service, command)?;
-                *self = Self::load(
-                    service,
-                    selected_identity,
-                    self.selected_action,
-                    InputMode::Filter,
-                    String::new(),
-                    None,
-                    self.theme,
-                )?;
-            }
+            Ok(command) => match command {
+                RequestedAction::New { .. } | RequestedAction::Move { .. } => {
+                    let action = command;
+                    self.input_mode = InputMode::Filter;
+                    self.input_text.clear();
+                    self.status_message = None;
+                    self.rebuild_view(true);
+                    return Ok(DashboardLoopAction::RunInteractiveAction(action));
+                }
+                _ => {
+                    commands::run_requested_action(service, command)?;
+                    *self = Self::load(
+                        service,
+                        selected_identity,
+                        self.selected_action,
+                        InputMode::Filter,
+                        String::new(),
+                        None,
+                        self.theme,
+                    )?;
+                }
+            },
             Err(error) => self.status_message = Some(format_command_error(error)),
         }
 
-        Ok(())
+        Ok(DashboardLoopAction::Continue)
     }
 
-    fn execute_action(&mut self, service: &SessionService, session_id: i64) -> Result<()> {
-        let target = session_id.to_string();
+    fn execute_action(
+        &mut self,
+        service: &SessionService,
+        target: String,
+    ) -> Result<DashboardLoopAction> {
         match self.selected_action {
-            DashboardAction::Attach => service.activate_target(&target)?,
+            DashboardAction::Attach => {
+                return Ok(DashboardLoopAction::RunInteractiveAction(
+                    RequestedAction::AttachTarget { target },
+                ));
+            }
             DashboardAction::Stop => service.stop_session(&target)?,
             DashboardAction::Remove => service.remove_session(&target)?,
             DashboardAction::Restart => {
                 self.begin_restart(service, target);
-                return Ok(());
+                return Ok(DashboardLoopAction::Continue);
             }
         }
 
-        self.refresh(service)
+        self.refresh(service)?;
+        Ok(DashboardLoopAction::Continue)
     }
 
     fn clear_input(&mut self, service: &SessionService) -> Result<()> {
@@ -304,9 +334,9 @@ impl DashboardState {
         self.refresh(service)
     }
 
-    fn handle_quit(&mut self, service: &SessionService) -> Result<bool> {
+    fn handle_quit(&mut self, service: &SessionService) -> Result<DashboardLoopAction> {
         if self.input_text.is_empty() {
-            return Ok(true);
+            return Ok(DashboardLoopAction::Exit);
         }
 
         self.input_text.clear();
@@ -314,7 +344,7 @@ impl DashboardState {
         self.status_message = None;
         self.rebuild_view(true);
         self.refresh(service)?;
-        Ok(false)
+        Ok(DashboardLoopAction::Continue)
     }
 
     fn rebuild_view(&mut self, filter_text_changed: bool) {
@@ -450,6 +480,24 @@ impl TerminalGuard {
             .context("failed to draw TUI")?;
         Ok(())
     }
+
+    fn suspend(&mut self) -> Result<()> {
+        disable_raw_mode().context("failed to disable terminal raw mode")?;
+        crossterm::execute!(self.terminal.backend_mut(), LeaveAlternateScreen)
+            .context("failed to leave alternate screen")?;
+        self.terminal
+            .show_cursor()
+            .context("failed to show cursor")?;
+        Ok(())
+    }
+
+    fn resume(&mut self) -> Result<()> {
+        enable_raw_mode().context("failed to enable terminal raw mode")?;
+        crossterm::execute!(self.terminal.backend_mut(), EnterAlternateScreen)
+            .context("failed to enter alternate screen")?;
+        self.terminal.clear().context("failed to clear terminal")?;
+        Ok(())
+    }
 }
 
 impl Drop for TerminalGuard {
@@ -457,5 +505,54 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
         let _ = crossterm::execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
+    }
+}
+
+fn run_interactive_action(
+    service: &SessionService,
+    state: &mut DashboardState,
+    terminal: &mut TerminalGuard,
+    action: RequestedAction,
+) -> Result<()> {
+    let selected_identity = state.selected_session();
+    let selected_action = state.selected_action;
+    let theme = state.theme;
+
+    terminal.suspend()?;
+    let action_result = commands::run_requested_action(service, action.clone());
+    let resume_result = terminal.resume();
+
+    let status_message = match action_result {
+        Ok(()) => None,
+        Err(error) => {
+            if commands::interactive_attach_failure_status(&action, &error).is_some() {
+                Some(short_interactive_action_error(&action))
+            } else {
+                Some(error.to_string())
+            }
+        }
+    };
+
+    resume_result?;
+
+    *state = DashboardState::load(
+        service,
+        selected_identity,
+        selected_action,
+        InputMode::Filter,
+        String::new(),
+        status_message,
+        theme,
+    )?;
+
+    Ok(())
+}
+
+fn short_interactive_action_error(action: &RequestedAction) -> String {
+    match action {
+        RequestedAction::AttachTarget { target } => format!("Attach failed for {target}"),
+        RequestedAction::New { name, .. } => format!("Attach failed for {name}"),
+        RequestedAction::Move { target, .. } => format!("Attach failed for {target}"),
+        _ => String::from("Attach failed"),
     }
 }

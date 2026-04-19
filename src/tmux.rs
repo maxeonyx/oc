@@ -43,8 +43,14 @@ impl Tmux {
 
     pub fn attach_session(&self, session_name: &str) -> Result<()> {
         if stdin().is_terminal() && stdout().is_terminal() {
-            let command = attach_session_command(session_name);
-            run_tmux_checked(command, format!("attach to tmux session '{session_name}'"))?;
+            if env::var_os("TMUX").is_some() {
+                bail!("tmux attach requires running oc from outside tmux");
+            }
+
+            run_tmux_interactive_checked(
+                attach_session_command(session_name),
+                format!("attach to tmux session '{session_name}'"),
+            )?;
             return Ok(());
         }
 
@@ -196,6 +202,18 @@ fn run_tmux_checked(mut command: Command, description: String) -> Result<Output>
     }
 
     Ok(output)
+}
+
+fn run_tmux_interactive_checked(mut command: Command, description: String) -> Result<()> {
+    let status = command
+        .status()
+        .with_context(|| format!("failed to {description}"))?;
+
+    if !status.success() {
+        return Err(anyhow!("failed to {description} (exit status: {status})"));
+    }
+
+    Ok(())
 }
 
 fn wait_for_session_exit(session_name: &str, timeout: std::time::Duration) -> Result<()> {

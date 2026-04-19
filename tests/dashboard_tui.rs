@@ -1,8 +1,9 @@
 mod common;
 
 use common::{
-    create_tmux_session_in_dir, create_tmux_session_in_dir_with_size, send_keys_to_tmux_session,
-    update_saved_session_opencode_session_id, wait_for_tmux_pane_contains, TestEnv,
+    TestEnv, create_tmux_session_in_dir, create_tmux_session_in_dir_with_size,
+    send_keys_to_tmux_session, update_saved_session_opencode_session_id,
+    wait_for_tmux_pane_contains,
 };
 use std::fs;
 use std::time::Duration;
