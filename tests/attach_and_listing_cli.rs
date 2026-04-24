@@ -1,11 +1,13 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, capture_tmux_pane, create_tmux_session_in_dir,
-    detach_tmux_client_from_session, insert_opencode_session, read_saved_sessions,
-    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_session_attached_count,
-    wait_for_file_exists, wait_for_tmux_client_detach_window, wait_for_tmux_pane_contains,
-    wait_for_tmux_session_attached,
+    capture_tmux_pane, create_tmux_session_in_dir, detach_tmux_client_from_session,
+    insert_opencode_session, read_saved_sessions, send_keys_to_tmux_session,
+    spawn_tmux_attach_client, tmux_pane_pid, tmux_session_attached_count,
+    update_opencode_process_session_start_ticks, wait_for_file_exists,
+    wait_for_opencode_process_session_state, wait_for_tmux_client_detach_window,
+    wait_for_tmux_pane_contains, wait_for_tmux_session_attached, FakeOpenCode, SavedSessionRow,
+    TestEnv,
 };
 use predicates::prelude::*;
 use std::path::Path;
@@ -118,6 +120,26 @@ fn launch_via_new(env: &TestEnv, fake_opencode: &FakeOpenCode, name: &str) {
         &["new", name],
         &session_name,
     );
+}
+
+fn spawn_interactive_oc_with_env(
+    env: &TestEnv,
+    fake_opencode: &FakeOpenCode,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> std::process::Child {
+    let mut command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut command);
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("oc command should spawn")
 }
 
 #[test]
@@ -401,4 +423,102 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
             opencode_args: String::from(EMPTY_ARGS_JSON),
         }]
     );
+}
+
+#[test]
+fn session_list_pid_catchup_fills_null_id_after_early_detach() {
+    let env = TestEnv::new("catchup-pid-early-detach");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    let child = spawn_interactive_oc_with_env(
+        &env,
+        &fake_opencode,
+        &["new", "dc"],
+        &[("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1800")],
+    );
+    env.wait_for_tmux_session_exists(&session_name);
+
+    wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        tmux_pane_pid(&session_name),
+        Duration::from_secs(5),
+        "to remain startup-only before detach",
+        |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
+    );
+
+    insert_opencode_session(env.opencode_db(), "ses_intruder", env.root_dir(), None);
+
+    detach_after_attach(&session_name);
+
+    let output = child
+        .wait_with_output()
+        .expect("interactive oc command should exit after detach");
+    assert!(
+        output.status.success(),
+        "Expected interactive oc command to succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        None
+    );
+
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    let created_id = std::fs::read_to_string(fake_opencode.session_id_log_path())
+        .expect("fake opencode session id log should be readable")
+        .trim()
+        .to_string();
+
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        Some(created_id)
+    );
+}
+
+#[test]
+fn session_list_pid_catchup_ignores_stale_process_session_row() {
+    let env = TestEnv::new("catchup-pid-ignores-stale-row");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    launch_via_new(&env, &fake_opencode, "dc");
+
+    env.oc_cmd().args(["stop", "dc"]).assert().success();
+    env.wait_for_tmux_session_absent(&session_name);
+
+    let pid = std::fs::read_to_string(fake_opencode.pid_log_path())
+        .expect("fake opencode pid log should be readable")
+        .trim()
+        .parse()
+        .expect("fake opencode pid log should contain integer pid");
+
+    update_opencode_process_session_start_ticks(env.opencode_db(), pid, u64::MAX);
+
+    env.oc_cmd()
+        .args([
+            "alias",
+            "stale",
+            env.root_dir().to_str().expect("utf-8 path"),
+        ])
+        .assert()
+        .success();
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
+
+    let saved_rows = read_saved_sessions(env.aliases_file());
+    let stale_row = saved_rows
+        .iter()
+        .find(|row| row.name == "stale")
+        .expect("saved stale alias should exist");
+    assert_eq!(stale_row.opencode_session_id, None);
 }

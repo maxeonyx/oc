@@ -519,6 +519,7 @@ log_dir="${OC_FAKE_OPENCODE_LOG_DIR:?}"
 opencode_db="${OC_OPENCODE_DB:?}"
 lifecycle_delay_ms="${OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS:-0}"
 disable_session_table="${OC_FAKE_OPENCODE_DISABLE_SESSION_TABLE:-0}"
+disable_process_session_table="${OC_FAKE_OPENCODE_DISABLE_PROCESS_SESSION_TABLE:-0}"
 mode=new
 session_id=
 cleanup_done=0
@@ -592,6 +593,9 @@ PY
 }
 
 upsert_process_session() {
+  if [ "$disable_process_session_table" = "1" ]; then
+    return
+  fi
   python3 - "$opencode_db" "$PWD" "$$" "$1" "${2-}" <<'PY'
 import sqlite3
 import sys
@@ -641,6 +645,9 @@ PY
 }
 
 delete_process_session() {
+  if [ "$disable_process_session_table" = "1" ]; then
+    return
+  fi
   python3 - "$opencode_db" "$$" <<'PY'
 import sqlite3
 import sys
@@ -1116,6 +1123,35 @@ pub fn update_saved_session_opencode_session_id(db_path: &Path, name: &str, sess
         updated, 1,
         "Expected exactly one saved session named {}",
         name
+    );
+}
+
+pub fn update_opencode_process_session_start_ticks(
+    db_path: &Path,
+    pid: u32,
+    proc_start_ticks: u64,
+) {
+    let connection = Connection::open(db_path)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    let updated = connection
+        .execute(
+            "UPDATE process_session SET proc_start_ticks = ?1 WHERE pid = ?2",
+            params![proc_start_ticks, pid],
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "Failed to update process_session start ticks for pid {} in {}: {}",
+                pid,
+                db_path.display(),
+                error
+            )
+        });
+
+    assert_eq!(
+        updated, 1,
+        "Expected exactly one process_session row for pid {}",
+        pid
     );
 }
 
