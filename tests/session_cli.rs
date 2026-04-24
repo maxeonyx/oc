@@ -1,9 +1,11 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session,
-    read_opencode_sessions, read_saved_sessions, tmux_pane_current_command, tmux_pane_pid,
-    wait_for_file_contains, wait_for_file_exists, wait_for_tmux_client_detach_window,
+    detach_tmux_client_from_session, read_opencode_process_sessions, read_opencode_sessions,
+    read_saved_sessions, tmux_pane_current_command, tmux_pane_pid, wait_for_file_contains,
+    wait_for_file_exists, wait_for_opencode_process_session,
+    wait_for_opencode_process_session_absent, wait_for_opencode_process_session_state,
+    wait_for_tmux_client_detach_window, FakeOpenCode, SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -62,6 +64,32 @@ fn spawn_new_command(
 fn allow_new_command_to_settle(session_name: &str) {
     wait_for_tmux_client_detach_window();
     detach_tmux_client_from_session(session_name);
+}
+
+fn pid_logged_by_fake(fake_opencode: &FakeOpenCode) -> u32 {
+    fs::read_to_string(fake_opencode.pid_log_path())
+        .expect("fake opencode pid log should be readable")
+        .trim()
+        .parse()
+        .expect("fake opencode pid log should contain integer pid")
+}
+
+fn spawn_new_command_with_lifecycle_delay(
+    env: &TestEnv,
+    fake_opencode: &FakeOpenCode,
+    delay_ms: u64,
+    args: &[&str],
+) -> std::process::Child {
+    let mut command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut command);
+    command
+        .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", delay_ms.to_string())
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("oc new should spawn")
 }
 
 fn run_new_command_and_wait(
@@ -357,6 +385,154 @@ fn launch_detach_captures_session_id() {
     let opencode_sessions = read_opencode_sessions(env.opencode_db());
     assert_eq!(opencode_sessions.len(), 1);
     assert_eq!(opencode_sessions[0].id, captured_id);
+}
+
+#[test]
+fn pane_pid_matches_fake_opencode_process_pid() {
+    let env = TestEnv::new("pane-pid-matches-fake-opencode-pid");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    let child = spawn_new_command_with_lifecycle_delay(&env, &fake_opencode, 1500, &["new", "dc"]);
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+
+    let fake_pid = pid_logged_by_fake(&fake_opencode);
+    let pane_pid = tmux_pane_pid(&session_name);
+    let startup_row =
+        wait_for_opencode_process_session(env.opencode_db(), fake_pid, Duration::from_secs(5));
+
+    allow_new_command_to_settle(&session_name);
+    let output = child
+        .wait_with_output()
+        .expect("oc new process should exit after attach handling completes");
+    assert!(
+        output.status.success(),
+        "Expected oc new to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(pane_pid, fake_pid);
+    assert_eq!(startup_row.pid, fake_pid);
+    assert_eq!(startup_row.reason.as_deref(), Some("startup"));
+}
+
+#[test]
+fn fake_opencode_new_writes_process_session_lifecycle() {
+    let env = TestEnv::new("fake-opencode-new-process-session-lifecycle");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    let child = spawn_new_command_with_lifecycle_delay(&env, &fake_opencode, 1500, &["new", "dc"]);
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+
+    let fake_pid = pid_logged_by_fake(&fake_opencode);
+    let startup_row =
+        wait_for_opencode_process_session(env.opencode_db(), fake_pid, Duration::from_secs(5));
+    assert_eq!(startup_row.pid, fake_pid);
+    assert_eq!(startup_row.directory, env.root_dir());
+    assert_eq!(startup_row.reason.as_deref(), Some("startup"));
+    assert_eq!(startup_row.session_id, None);
+    assert!(startup_row.proc_start_ticks > 0);
+
+    let created_row = wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        fake_pid,
+        Duration::from_secs(5),
+        "to be created",
+        |row| row.reason.as_deref() == Some("created") && row.session_id.is_some(),
+    );
+
+    allow_new_command_to_settle(&session_name);
+    let output = child
+        .wait_with_output()
+        .expect("oc new process should exit after attach handling completes");
+    assert!(
+        output.status.success(),
+        "Expected oc new to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    let captured_id = read_captured_session_id(&fake_opencode);
+    assert_eq!(
+        created_row.session_id.as_deref(),
+        Some(captured_id.as_str())
+    );
+
+    env.oc_cmd().args(["stop", "dc"]).assert().success();
+    env.wait_for_tmux_session_absent(&session_name);
+    wait_for_opencode_process_session_absent(env.opencode_db(), fake_pid, Duration::from_secs(5));
+
+    let process_rows_after = read_opencode_process_sessions(env.opencode_db());
+    assert!(process_rows_after.iter().all(|row| row.pid != fake_pid));
+
+    let session_rows = read_opencode_sessions(env.opencode_db());
+    assert_eq!(session_rows.len(), 1);
+    assert_eq!(session_rows[0].id, captured_id);
+}
+
+#[test]
+fn fake_opencode_resume_writes_resumed_process_session_then_deletes_on_exit() {
+    let env = TestEnv::new("fake-opencode-resume-process-session-lifecycle");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "dc"]);
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    let captured_id = read_captured_session_id(&fake_opencode);
+    fs::remove_file(fake_opencode.pid_log_path()).expect("old pid log should be removable");
+
+    let mut restart_command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut restart_command);
+    let child = restart_command
+        .args(["restart", "dc"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("oc restart should spawn");
+
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+    let fake_pid = pid_logged_by_fake(&fake_opencode);
+
+    let resumed_row = wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        fake_pid,
+        Duration::from_secs(5),
+        "to be resumed",
+        |row| {
+            row.reason.as_deref() == Some("resumed")
+                && row.session_id.as_deref() == Some(captured_id.as_str())
+        },
+    );
+    assert_eq!(resumed_row.pid, fake_pid);
+    assert_eq!(resumed_row.directory, env.root_dir());
+    assert_eq!(resumed_row.reason.as_deref(), Some("resumed"));
+    assert_eq!(
+        resumed_row.session_id.as_deref(),
+        Some(captured_id.as_str())
+    );
+    assert!(resumed_row.proc_start_ticks > 0);
+
+    allow_new_command_to_settle(&session_name);
+    let output = child
+        .wait_with_output()
+        .expect("oc restart process should exit after attach handling completes");
+    assert!(
+        output.status.success(),
+        "Expected oc restart to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    env.oc_cmd().args(["stop", "dc"]).assert().success();
+    env.wait_for_tmux_session_absent(&session_name);
+    wait_for_opencode_process_session_absent(env.opencode_db(), fake_pid, Duration::from_secs(5));
 }
 
 #[test]

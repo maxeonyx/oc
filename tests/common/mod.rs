@@ -2,7 +2,7 @@
 
 use assert_cmd::Command;
 use rand::Rng;
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{params, Connection, OpenFlags};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -502,6 +502,16 @@ pub struct OpenCodeSessionRow {
     pub parent_id: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenCodeProcessSessionRow {
+    pub pid: u32,
+    pub proc_start_ticks: u64,
+    pub session_id: Option<String>,
+    pub directory: PathBuf,
+    pub updated_at: i64,
+    pub reason: Option<String>,
+}
+
 const FAKE_OPENCODE_SCRIPT: &str = concat!(
     "#!/bin/sh\n",
     "set -eu\n",
@@ -793,6 +803,111 @@ pub fn read_opencode_sessions(db_path: &Path) -> Vec<OpenCodeSessionRow> {
         .expect("OpenCode session rows should be readable")
         .collect::<Result<Vec<_>, _>>()
         .expect("OpenCode session rows should decode")
+}
+
+pub fn read_opencode_process_sessions(db_path: &Path) -> Vec<OpenCodeProcessSessionRow> {
+    if !db_path.exists() {
+        return Vec::new();
+    }
+
+    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    let table_exists = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'process_session'",
+            params![],
+            |_| Ok(()),
+        )
+        .is_ok();
+
+    if !table_exists {
+        return Vec::new();
+    }
+
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT pid, proc_start_ticks, session_id, directory, updated_at, reason
+            FROM process_session
+            ORDER BY pid
+            ",
+        )
+        .expect("OpenCode process_session table should be queryable");
+
+    statement
+        .query_map(params![], |row| {
+            Ok(OpenCodeProcessSessionRow {
+                pid: row.get(0)?,
+                proc_start_ticks: row.get(1)?,
+                session_id: row.get(2)?,
+                directory: PathBuf::from(row.get::<_, String>(3)?),
+                updated_at: row.get(4)?,
+                reason: row.get(5)?,
+            })
+        })
+        .expect("OpenCode process_session rows should be readable")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("OpenCode process_session rows should decode")
+}
+
+pub fn wait_for_opencode_process_session(
+    db_path: &Path,
+    pid: u32,
+    timeout: Duration,
+) -> OpenCodeProcessSessionRow {
+    let description = format!("process_session row for pid {}", pid);
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let rows = read_opencode_process_sessions(db_path);
+        if let Some(row) = rows.into_iter().find(|row| row.pid == pid) {
+            WaitStatus::ready(row.clone(), format!("found row for pid {}", pid))
+        } else {
+            WaitStatus::pending(format!(
+                "rows present: {:?}",
+                read_opencode_process_sessions(db_path)
+            ))
+        }
+    })
+}
+
+pub fn wait_for_opencode_process_session_state<F>(
+    db_path: &Path,
+    pid: u32,
+    timeout: Duration,
+    description_suffix: &str,
+    predicate: F,
+) -> OpenCodeProcessSessionRow
+where
+    F: Fn(&OpenCodeProcessSessionRow) -> bool,
+{
+    let description = format!("process_session row for pid {} {}", pid, description_suffix);
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let rows = read_opencode_process_sessions(db_path);
+        if let Some(row) = rows.into_iter().find(|row| row.pid == pid) {
+            if predicate(&row) {
+                WaitStatus::ready(row.clone(), format!("matched row for pid {}", pid))
+            } else {
+                WaitStatus::pending(format!("current row: {:?}", row))
+            }
+        } else {
+            WaitStatus::pending(String::from("row missing"))
+        }
+    })
+}
+
+pub fn wait_for_opencode_process_session_absent(db_path: &Path, pid: u32, timeout: Duration) {
+    let description = format!("process_session row for pid {} to disappear", pid);
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let rows = read_opencode_process_sessions(db_path);
+        if rows.iter().any(|row| row.pid == pid) {
+            WaitStatus::pending(format!("rows present: {:?}", rows))
+        } else {
+            WaitStatus::ready((), format!("pid {} absent", pid))
+        }
+    });
 }
 
 pub fn insert_opencode_session(
