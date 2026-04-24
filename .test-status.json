@@ -32,6 +32,7 @@
     "oc::harness_foundation$wait_for_file_contains_observes_eventual_file_content": "passing",
     "oc::migration_and_memory$hidden_memory_parser_reads_proc_status_kib": "passing",
     "oc::migration_and_memory$migrate_imports_old_aliases_file_idempotently": "passing",
+    "oc::migration_and_memory$migrate_preserves_legacy_directory_and_session_fields": "pending",
     "oc::migration_and_memory$migrate_reports_conflicts_without_overwriting": "passing",
     "oc::oc$tui::render::theme::tests::group_header_contrast_stays_within_bound_for_representative_palettes": "passing",
     "oc::session_cli$concurrent_same_directory_sessions_capture_distinct_ids_by_pid": "passing",
