@@ -7,6 +7,10 @@ mode=new
 session_id=
 declare -a forwarded_args=()
 
+startup_delay_seconds() {
+  printf '%s' "$((RANDOM % 9 + 2))"
+}
+
 generate_session_id() {
   python3 - <<'PY'
 import uuid
@@ -15,7 +19,7 @@ print(f"ses_{uuid.uuid4().hex}")
 PY
 }
 
-upsert_opencode_session() {
+write_opencode_session() {
   python3 - "$opencode_db" "$PWD" "$session_id" <<'PY'
 import sqlite3
 import sys
@@ -58,6 +62,13 @@ finally:
 PY
 }
 
+show_startup_delay() {
+  local delay_seconds
+  delay_seconds=$(startup_delay_seconds)
+  printf '%s\n' 'Starting up...'
+  sleep "$delay_seconds"
+}
+
 print_screen() {
   printf '%s\n' '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
   printf '%s\n' 'Fake OpenCode preview session'
@@ -90,10 +101,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$session_id" ]]; then
-  session_id=$(generate_session_id)
+  mode=new
+else
+  mode=resume
 fi
-
-upsert_opencode_session
 
 cleanup() {
   printf '\nFake OpenCode exiting: %s\n' "$session_id"
@@ -102,7 +113,20 @@ cleanup() {
 
 trap cleanup INT TERM
 
-print_screen
+show_startup_delay
+
+if [[ "$mode" == 'new' ]]; then
+  printf '%s' 'Prompt     : '
+  IFS= read -r initial_prompt </dev/tty || cleanup
+  session_id=$(generate_session_id)
+  write_opencode_session
+  printf 'Session created: %s\n' "$session_id"
+  print_screen
+  printf 'Input      : %s\n' "$initial_prompt"
+else
+  write_opencode_session
+  print_screen
+fi
 
 while IFS= read -r line; do
   printf 'Input      : %s\n' "$line"
