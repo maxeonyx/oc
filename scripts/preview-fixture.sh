@@ -5,7 +5,6 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 TMP_ROOT=${TMPDIR:-/tmp}
-FIXTURE_PATTERN="$TMP_ROOT/oc-test-fixture.*"
 PREVIEW_TMUX_PREFIX="oc2-preview-"
 LATEST_ENV_FILE="$TMP_ROOT/oc-fixture-env.sh"
 
@@ -47,31 +46,50 @@ cleanup_one_fixture() {
     done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
   fi
 
-  while IFS= read -r session_name; do
-    [[ "$session_name" == "$PREVIEW_TMUX_PREFIX"* ]] || continue
-    tmux detach-client -s "$session_name" >/dev/null 2>&1 || true
-    tmux kill-session -t "$session_name" >/dev/null 2>&1 || true
-  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
-
   rm -rf "$fixture_dir"
-}
-
-cleanup_existing_fixtures() {
-  shopt -s nullglob
-  local fixture_dirs=( $FIXTURE_PATTERN )
-  shopt -u nullglob
-
-  local fixture_dir
-  for fixture_dir in "${fixture_dirs[@]}"; do
-    [[ -d "$fixture_dir" ]] || continue
-    cleanup_one_fixture "$fixture_dir"
-  done
 }
 
 clear_latest_env_file() {
   if [[ -f "$LATEST_ENV_FILE" ]]; then
     rm -f "$LATEST_ENV_FILE"
   fi
+}
+
+latest_fixture_dir() {
+  if [[ ! -f "$LATEST_ENV_FILE" ]]; then
+    return 1
+  fi
+
+  # shellcheck disable=SC1090
+  source "$LATEST_ENV_FILE"
+
+  if [[ -z "${OC_TEST_FIXTURE_DIR:-}" ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "$OC_TEST_FIXTURE_DIR"
+}
+
+fixture_is_live() {
+  local candidate_dir=$1
+
+  [[ -d "$candidate_dir" ]] || return 1
+  [[ -f "$candidate_dir/fixture.env" ]] || return 1
+
+  local fixture_tmux_prefix=
+
+  # shellcheck disable=SC1090
+  source "$candidate_dir/fixture.env"
+  fixture_tmux_prefix=${OC_TMUX_PREFIX:-}
+
+  [[ -n "$fixture_tmux_prefix" ]] || return 1
+
+  while IFS= read -r session_name; do
+    [[ "$session_name" == "$fixture_tmux_prefix"* ]] || continue
+    return 0
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+
+  return 1
 }
 
 theme=
@@ -112,25 +130,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 fixture_dir=
-cleanup_current_fixture() {
-  local exit_code=$?
 
+cargo build --manifest-path "$REPO_ROOT/Cargo.toml"
+if fixture_dir=$(latest_fixture_dir) && fixture_is_live "$fixture_dir"; then
+  :
+else
   if [[ -n "$fixture_dir" ]] && [[ -d "$fixture_dir" ]]; then
     cleanup_one_fixture "$fixture_dir"
   else
     clear_latest_env_file
   fi
 
-  exit "$exit_code"
-}
-
-trap cleanup_current_fixture EXIT INT TERM
-
-cargo build --manifest-path "$REPO_ROOT/Cargo.toml"
-cleanup_existing_fixtures
-
-fixture_dir=$(mktemp -d "$TMP_ROOT/oc-test-fixture.XXXXXX")
-OC_TEST_FIXTURE_DIR="$fixture_dir" OC_TMUX_PREFIX="$PREVIEW_TMUX_PREFIX" "$SCRIPT_DIR/test-fixture.sh" setup >/dev/null
+  fixture_dir=$(mktemp -d "$TMP_ROOT/oc-test-fixture.XXXXXX")
+  OC_TEST_FIXTURE_DIR="$fixture_dir" OC_TMUX_PREFIX="$PREVIEW_TMUX_PREFIX" "$SCRIPT_DIR/test-fixture.sh" setup >/dev/null
+fi
 
 # shellcheck disable=SC1090
 source "$fixture_dir/fixture.env"
