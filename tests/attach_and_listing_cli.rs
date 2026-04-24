@@ -489,36 +489,45 @@ fn session_list_pid_catchup_ignores_stale_process_session_row() {
     let fake_opencode = env.install_fake_opencode();
     let session_name = managed_tmux_session_name(&env, "dc");
 
-    launch_via_new(&env, &fake_opencode, "dc");
+    let child = spawn_interactive_oc_with_env(
+        &env,
+        &fake_opencode,
+        &["new", "dc"],
+        &[("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1800")],
+    );
+    env.wait_for_tmux_session_exists(&session_name);
 
-    env.oc_cmd().args(["stop", "dc"]).assert().success();
-    env.wait_for_tmux_session_absent(&session_name);
+    let pid = tmux_pane_pid(&session_name);
+    wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        pid,
+        Duration::from_secs(5),
+        "to remain startup-only before detach",
+        |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
+    );
 
-    let pid = std::fs::read_to_string(fake_opencode.pid_log_path())
-        .expect("fake opencode pid log should be readable")
-        .trim()
-        .parse()
-        .expect("fake opencode pid log should contain integer pid");
+    detach_after_attach(&session_name);
 
-    update_opencode_process_session_start_ticks(env.opencode_db(), pid, u64::MAX);
+    let output = child
+        .wait_with_output()
+        .expect("interactive oc command should exit after detach");
+    assert!(
+        output.status.success(),
+        "Expected interactive oc command to succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    env.oc_cmd()
-        .args([
-            "alias",
-            "stale",
-            env.root_dir().to_str().expect("utf-8 path"),
-        ])
-        .assert()
-        .success();
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    update_opencode_process_session_start_ticks(env.opencode_db(), pid, 1);
+
     env.oc_cmd()
         .args(["__dump-session-list"])
         .assert()
         .success();
 
-    let saved_rows = read_saved_sessions(env.aliases_file());
-    let stale_row = saved_rows
-        .iter()
-        .find(|row| row.name == "stale")
-        .expect("saved stale alias should exist");
-    assert_eq!(stale_row.opencode_session_id, None);
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        None
+    );
 }

@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use crate::config::RuntimeConfig;
 use crate::opencode_db::{
-    OpenCodeDb, ProcessSessionLookup, ProcessSessionRowLookup, RootSessionIdLookup,
+    OpenCodeDb, ProcessSessionLookup, ProcessSessionRowLookup, ProcessSessionTableLookup,
+    RootSessionIdLookup,
 };
 use crate::session::{NewSessionAlias, SavedSession, SessionListEntry, SessionRef};
 use crate::session_list::merge_saved_and_runtime_sessions_with_prefix;
@@ -74,9 +75,9 @@ impl SessionService {
 
     pub fn list_dashboard_sessions(&self) -> Result<Vec<SessionListEntry>> {
         let mut store = self.open_session_store()?;
-        self.catch_up_missing_session_ids(&mut store)?;
-        let saved_sessions = store.list_saved_sessions()?;
         let tmux = self.open_tmux();
+        self.catch_up_missing_session_ids(&tmux, &mut store)?;
+        let saved_sessions = store.list_saved_sessions()?;
         let runtimes = tmux.list_managed_sessions()?;
 
         merge_saved_and_runtime_sessions_with_prefix(
@@ -291,6 +292,12 @@ impl SessionService {
             return Ok(None);
         }
 
+        match self.open_opencode_db().process_session_table_lookup()? {
+            ProcessSessionTableLookup::Available => return Ok(None),
+            ProcessSessionTableLookup::Missing => {}
+            ProcessSessionTableLookup::Unavailable => return Ok(None),
+        }
+
         match self
             .open_opencode_db()
             .root_session_ids_for_directory(&saved_session.directory)?
@@ -346,9 +353,46 @@ impl SessionService {
         Ok(())
     }
 
-    fn catch_up_missing_session_ids(&self, store: &mut SessionStore) -> Result<()> {
+    fn catch_up_missing_session_ids(&self, tmux: &Tmux, store: &mut SessionStore) -> Result<()> {
         let saved_sessions = store.list_saved_sessions()?;
         let opencode_db = self.open_opencode_db();
+
+        match opencode_db.process_session_table_lookup()? {
+            ProcessSessionTableLookup::Available => {
+                for saved_session in saved_sessions {
+                    if saved_session.opencode_session_id.is_some() {
+                        continue;
+                    }
+
+                    let tmux_session_name =
+                        saved_session.managed_tmux_session_name(tmux.managed_session_prefix());
+                    let Some(pid) = tmux.pane_pid(&tmux_session_name)? else {
+                        continue;
+                    };
+
+                    match opencode_db.process_session_id_for_pid(pid)? {
+                        ProcessSessionLookup::Available(ProcessSessionRowLookup::SessionId(
+                            captured_id,
+                        )) => {
+                            self.persist_captured_session_id(store, &saved_session, &captured_id)?;
+                        }
+                        ProcessSessionLookup::Available(
+                            ProcessSessionRowLookup::RowMissing
+                            | ProcessSessionRowLookup::SessionIdMissing
+                            | ProcessSessionRowLookup::Stale,
+                        )
+                        | ProcessSessionLookup::Unavailable => {}
+                        ProcessSessionLookup::Available(ProcessSessionRowLookup::TableMissing) => {
+                            unreachable!("process_session table presence changed during catch-up")
+                        }
+                    }
+                }
+
+                return Ok(());
+            }
+            ProcessSessionTableLookup::Missing => {}
+            ProcessSessionTableLookup::Unavailable => return Ok(()),
+        }
 
         for saved_session in saved_sessions {
             if saved_session.opencode_session_id.is_some() {

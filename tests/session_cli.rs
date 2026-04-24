@@ -397,6 +397,7 @@ fn pane_pid_matches_fake_opencode_process_pid() {
     fake_opencode.apply_to_command(&mut new_command);
     let child = new_command
         .env("OC_FAKE_OPENCODE_DISABLE_SESSION_TABLE", "1")
+        .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1500")
         .args(["new", "dc"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

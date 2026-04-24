@@ -16,6 +16,13 @@ pub enum ProcessSessionLookup {
     Unavailable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessSessionTableLookup {
+    Available,
+    Missing,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcessSessionRowLookup {
     TableMissing,
@@ -115,30 +122,14 @@ impl OpenCodeDb {
                 Err(error) => return self.handle_process_session_open_error(error),
             };
 
-        let table_exists = match connection.query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'process_session'",
-            params![],
-            |_| Ok(()),
-        ) {
-            Ok(()) => true,
-            Err(rusqlite::Error::QueryReturnedNoRows) => false,
-            Err(error) if is_unavailable_error(&error) => {
-                return Ok(ProcessSessionLookup::Unavailable)
+        match query_process_session_table_lookup(&connection, &self.path)? {
+            ProcessSessionTableLookup::Available => {}
+            ProcessSessionTableLookup::Missing => {
+                return Ok(ProcessSessionLookup::Available(
+                    ProcessSessionRowLookup::TableMissing,
+                ));
             }
-            Err(error) => {
-                return Err(anyhow!(error)).with_context(|| {
-                    format!(
-                        "failed to query process_session table presence in {}",
-                        self.path.display()
-                    )
-                });
-            }
-        };
-
-        if !table_exists {
-            return Ok(ProcessSessionLookup::Available(
-                ProcessSessionRowLookup::TableMissing,
-            ));
+            ProcessSessionTableLookup::Unavailable => return Ok(ProcessSessionLookup::Unavailable),
         }
 
         let row = match connection.query_row(
@@ -183,6 +174,20 @@ impl OpenCodeDb {
         }))
     }
 
+    pub fn process_session_table_lookup(&self) -> Result<ProcessSessionTableLookup> {
+        if !self.path.exists() {
+            return Ok(ProcessSessionTableLookup::Missing);
+        }
+
+        let connection =
+            match Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+                Ok(connection) => connection,
+                Err(error) => return self.handle_process_session_table_open_error(error),
+            };
+
+        query_process_session_table_lookup(&connection, &self.path)
+    }
+
     fn handle_open_error(&self, error: rusqlite::Error) -> Result<RootSessionIdLookup> {
         if is_unavailable_error(&error) {
             return Ok(RootSessionIdLookup::Unavailable);
@@ -202,6 +207,39 @@ impl OpenCodeDb {
 
         Err(anyhow!(error))
             .with_context(|| format!("failed to open OpenCode database {}", self.path.display()))
+    }
+
+    fn handle_process_session_table_open_error(
+        &self,
+        error: rusqlite::Error,
+    ) -> Result<ProcessSessionTableLookup> {
+        if is_unavailable_error(&error) {
+            return Ok(ProcessSessionTableLookup::Unavailable);
+        }
+
+        Err(anyhow!(error))
+            .with_context(|| format!("failed to open OpenCode database {}", self.path.display()))
+    }
+}
+
+fn query_process_session_table_lookup(
+    connection: &Connection,
+    path: &Path,
+) -> Result<ProcessSessionTableLookup> {
+    match connection.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'process_session'",
+        params![],
+        |_| Ok(()),
+    ) {
+        Ok(()) => Ok(ProcessSessionTableLookup::Available),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(ProcessSessionTableLookup::Missing),
+        Err(error) if is_unavailable_error(&error) => Ok(ProcessSessionTableLookup::Unavailable),
+        Err(error) => Err(anyhow!(error)).with_context(|| {
+            format!(
+                "failed to query process_session table presence in {}",
+                path.display()
+            )
+        }),
     }
 }
 
