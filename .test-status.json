@@ -39,6 +39,7 @@
     "oc::session_cli$fake_opencode_resume_writes_resumed_process_session_then_deletes_on_exit": "passing",
     "oc::session_cli$launch_detach_captures_session_id": "passing",
     "oc::session_cli$launch_detach_captures_session_id_by_pid_when_session_table_is_unavailable": "passing",
+    "oc::session_cli$launch_detach_falls_back_to_directory_diff_when_process_session_table_is_missing": "pending",
     "oc::session_cli$new_creates_alias_launches_tmux_session_and_attaches": "passing",
     "oc::session_cli$new_rejects_duplicate_name_without_creating_second_tmux_session": "passing",
     "oc::session_cli$new_rejects_missing_directory": "passing",

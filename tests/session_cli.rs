@@ -622,6 +622,50 @@ fn launch_detach_captures_session_id_by_pid_when_session_table_is_unavailable() 
 }
 
 #[test]
+fn launch_detach_falls_back_to_directory_diff_when_process_session_table_is_missing() {
+    let env = TestEnv::new("capture-session-id-without-process-session-table");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    let child = spawn_new_command_with_lifecycle_delay(&env, &fake_opencode, 1500, &["new", "dc"]);
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+
+    allow_new_command_to_settle(&session_name);
+    let output = child
+        .wait_with_output()
+        .expect("oc new process should exit after attach handling completes");
+    assert!(
+        output.status.success(),
+        "Expected oc new to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    let captured_id = read_captured_session_id(&fake_opencode);
+
+    assert_saved_sessions(
+        &env,
+        vec![SavedSessionRow {
+            id: 1,
+            name: String::from("dc"),
+            directory: env.root_dir().to_path_buf(),
+            opencode_session_id: Some(captured_id.clone()),
+            opencode_args: String::from(EMPTY_ARGS_JSON),
+        }],
+    );
+
+    assert_eq!(
+        read_opencode_process_sessions(env.opencode_db()),
+        Vec::new()
+    );
+    let opencode_sessions = read_opencode_sessions(env.opencode_db());
+    assert_eq!(opencode_sessions.len(), 1);
+    assert_eq!(opencode_sessions[0].id, captured_id);
+}
+
+#[test]
 fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
     let env = TestEnv::new("restart-uses-captured-id-without-session-table");
     let fake_opencode = env.install_fake_opencode();
