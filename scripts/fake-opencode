@@ -5,6 +5,7 @@ set -euo pipefail
 opencode_db=${OC_OPENCODE_DB:?}
 mode=new
 session_id=
+cleanup_done=0
 declare -a forwarded_args=()
 
 startup_delay_seconds() {
@@ -62,6 +63,79 @@ finally:
 PY
 }
 
+upsert_process_session() {
+  python3 - "$opencode_db" "$PWD" "$$" "$1" "${2-}" <<'PY'
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+db_path = Path(sys.argv[1])
+directory = sys.argv[2]
+pid = int(sys.argv[3])
+reason = sys.argv[4]
+session_id = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else None
+proc_start_ticks = int(Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()[21])
+
+db_path.parent.mkdir(parents=True, exist_ok=True)
+connection = sqlite3.connect(db_path)
+try:
+    connection.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS process_session (
+            pid INTEGER PRIMARY KEY,
+            proc_start_ticks INTEGER NOT NULL,
+            session_id TEXT,
+            directory TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            reason TEXT
+        )
+        '''
+    )
+    updated_at = time.time_ns() // 1_000_000
+    connection.execute(
+        '''
+        INSERT INTO process_session (pid, proc_start_ticks, session_id, directory, updated_at, reason)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(pid) DO UPDATE SET
+            proc_start_ticks = excluded.proc_start_ticks,
+            session_id = excluded.session_id,
+            directory = excluded.directory,
+            updated_at = excluded.updated_at,
+            reason = excluded.reason
+        ''',
+        (pid, proc_start_ticks, session_id, directory, updated_at, reason),
+    )
+    connection.commit()
+finally:
+    connection.close()
+PY
+}
+
+delete_process_session() {
+  python3 - "$opencode_db" "$$" <<'PY'
+import sqlite3
+import sys
+from pathlib import Path
+
+db_path = Path(sys.argv[1])
+pid = int(sys.argv[2])
+
+if not db_path.exists():
+    raise SystemExit(0)
+
+connection = sqlite3.connect(db_path)
+try:
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS process_session (pid INTEGER PRIMARY KEY, proc_start_ticks INTEGER NOT NULL, session_id TEXT, directory TEXT NOT NULL, updated_at INTEGER NOT NULL, reason TEXT)"
+    )
+    connection.execute("DELETE FROM process_session WHERE pid = ?", (pid,))
+    connection.commit()
+finally:
+    connection.close()
+PY
+}
+
 show_startup_delay() {
   local delay_seconds
   delay_seconds=$(startup_delay_seconds)
@@ -107,6 +181,11 @@ else
 fi
 
 cleanup() {
+  if [[ "$cleanup_done" == 1 ]]; then
+    return
+  fi
+  cleanup_done=1
+  delete_process_session || true
   printf '\nFake OpenCode exiting: %s\n' "$session_id"
   exit 0
 }
@@ -114,17 +193,17 @@ cleanup() {
 trap cleanup INT TERM
 
 show_startup_delay
+upsert_process_session startup
 
 if [[ "$mode" == 'new' ]]; then
-  printf '%s' 'Prompt     : '
-  IFS= read -r initial_prompt </dev/tty || cleanup
   session_id=$(generate_session_id)
   write_opencode_session
+  upsert_process_session created "$session_id"
   printf 'Session created: %s\n' "$session_id"
   print_screen
-  printf 'Input      : %s\n' "$initial_prompt"
 else
   write_opencode_session
+  upsert_process_session resumed "$session_id"
   print_screen
 fi
 

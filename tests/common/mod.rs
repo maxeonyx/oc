@@ -512,78 +512,207 @@ pub struct OpenCodeProcessSessionRow {
     pub reason: Option<String>,
 }
 
-const FAKE_OPENCODE_SCRIPT: &str = concat!(
-    "#!/bin/sh\n",
-    "set -eu\n",
-    "log_dir=\"${OC_FAKE_OPENCODE_LOG_DIR:?}\"\n",
-    "opencode_db=\"${OC_OPENCODE_DB:?}\"\n",
-    "pwd >\"$log_dir/cwd.txt\"\n",
-    "printf '%s\\n' \"$@\" >\"$log_dir/args.txt\"\n",
-    "printf '%s\\n' \"$$\" >\"$log_dir/pid.txt\"\n",
-    "session_id=\"$(python3 - \"$opencode_db\" \"$log_dir\" \"$PWD\" \"$@\" <<'PY'\n",
-    "import sqlite3\n",
-    "import sys\n",
-    "import time\n",
-    "import uuid\n",
-    "from pathlib import Path\n",
-    "\n",
-    "opencode_db = Path(sys.argv[1])\n",
-    "log_dir = Path(sys.argv[2])\n",
-    "directory = sys.argv[3]\n",
-    "argv = sys.argv[4:]\n",
-    "\n",
-    "session_id = None\n",
-    "for index, arg in enumerate(argv):\n",
-    "    if arg == '--session':\n",
-    "        if index + 1 >= len(argv):\n",
-    "            raise SystemExit('fake opencode expected a session ID after --session')\n",
-    "        session_id = argv[index + 1]\n",
-    "        break\n",
-    "\n",
-    "if session_id is None:\n",
-    "    session_id = f'ses_{uuid.uuid4().hex}'\n",
-    "\n",
-    "opencode_db.parent.mkdir(parents=True, exist_ok=True)\n",
-    "connection = sqlite3.connect(opencode_db)\n",
-    "try:\n",
-    "    connection.execute(\n",
-    "        '''\n",
-    "        CREATE TABLE IF NOT EXISTS session (\n",
-    "            id TEXT PRIMARY KEY NOT NULL,\n",
-    "            directory TEXT NOT NULL,\n",
-    "            parent_id TEXT,\n",
-    "            time_created INTEGER NOT NULL,\n",
-    "            time_updated INTEGER NOT NULL\n",
-    "        )\n",
-    "        '''\n",
-    "    )\n",
-    "    now = int(time.time())\n",
-    "    connection.execute(\n",
-    "        '''\n",
-    "        INSERT INTO session (id, directory, parent_id, time_created, time_updated)\n",
-    "        VALUES (?, ?, NULL, ?, ?)\n",
-    "        ON CONFLICT(id) DO UPDATE SET\n",
-    "            directory = excluded.directory,\n",
-    "            time_updated = excluded.time_updated\n",
-    "        ''',\n",
-    "        (session_id, directory, now, now),\n",
-    "    )\n",
-    "    connection.commit()\n",
-    "finally:\n",
-    "    connection.close()\n",
-    "\n",
-    "(log_dir / 'session-id.txt').write_text(f'{session_id}\\n', encoding='utf-8')\n",
-    "print(session_id)\n",
-    "PY\n",
-    ")\"\n",
-    "printf 'START\\n' >>\"$log_dir/events.txt\"\n",
-    "printf 'Fake OpenCode started: %s\\n' \"$session_id\"\n",
-    "trap 'printf \"INT\\n\" >>\"$log_dir/events.txt\"' INT\n",
-    "while IFS= read -r line; do\n",
-    "    printf 'LINE:%s\\n' \"$line\" >>\"$log_dir/events.txt\"\n",
-    "done\n",
-    "printf 'EOF\\n' >>\"$log_dir/events.txt\"\n",
-);
+const FAKE_OPENCODE_SCRIPT: &str = r#"#!/bin/sh
+set -eu
+
+log_dir="${OC_FAKE_OPENCODE_LOG_DIR:?}"
+opencode_db="${OC_OPENCODE_DB:?}"
+lifecycle_delay_ms="${OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS:-0}"
+mode=new
+session_id=
+cleanup_done=0
+
+pwd >"$log_dir/cwd.txt"
+printf '%s\n' "$@" >"$log_dir/args.txt"
+printf '%s\n' "$$" >"$log_dir/pid.txt"
+
+generate_session_id() {
+  python3 - <<'PY'
+import uuid
+
+print(f"ses_{uuid.uuid4().hex}")
+PY
+}
+
+maybe_delay_lifecycle() {
+  if [ "$lifecycle_delay_ms" -gt 0 ]; then
+    python3 - "$lifecycle_delay_ms" <<'PY'
+import sys
+import time
+
+time.sleep(int(sys.argv[1]) / 1000)
+PY
+  fi
+}
+
+write_session_row() {
+  python3 - "$opencode_db" "$PWD" "$1" <<'PY'
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+db_path = Path(sys.argv[1])
+directory = sys.argv[2]
+session_id = sys.argv[3]
+
+db_path.parent.mkdir(parents=True, exist_ok=True)
+connection = sqlite3.connect(db_path)
+try:
+    connection.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS session (
+            id TEXT PRIMARY KEY NOT NULL,
+            directory TEXT NOT NULL,
+            parent_id TEXT,
+            time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL
+        )
+        '''
+    )
+    now = int(time.time())
+    connection.execute(
+        '''
+        INSERT INTO session (id, directory, parent_id, time_created, time_updated)
+        VALUES (?, ?, NULL, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            directory = excluded.directory,
+            time_updated = excluded.time_updated
+        ''',
+        (session_id, directory, now, now),
+    )
+    connection.commit()
+finally:
+    connection.close()
+PY
+}
+
+upsert_process_session() {
+  python3 - "$opencode_db" "$PWD" "$$" "$1" "${2-}" <<'PY'
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+db_path = Path(sys.argv[1])
+directory = sys.argv[2]
+pid = int(sys.argv[3])
+reason = sys.argv[4]
+session_id = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else None
+proc_start_ticks = int(Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()[21])
+
+db_path.parent.mkdir(parents=True, exist_ok=True)
+connection = sqlite3.connect(db_path)
+try:
+    connection.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS process_session (
+            pid INTEGER PRIMARY KEY,
+            proc_start_ticks INTEGER NOT NULL,
+            session_id TEXT,
+            directory TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            reason TEXT
+        )
+        '''
+    )
+    updated_at = time.time_ns() // 1_000_000
+    connection.execute(
+        '''
+        INSERT INTO process_session (pid, proc_start_ticks, session_id, directory, updated_at, reason)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(pid) DO UPDATE SET
+            proc_start_ticks = excluded.proc_start_ticks,
+            session_id = excluded.session_id,
+            directory = excluded.directory,
+            updated_at = excluded.updated_at,
+            reason = excluded.reason
+        ''',
+        (pid, proc_start_ticks, session_id, directory, updated_at, reason),
+    )
+    connection.commit()
+finally:
+    connection.close()
+PY
+}
+
+delete_process_session() {
+  python3 - "$opencode_db" "$$" <<'PY'
+import sqlite3
+import sys
+from pathlib import Path
+
+db_path = Path(sys.argv[1])
+pid = int(sys.argv[2])
+
+if not db_path.exists():
+    raise SystemExit(0)
+
+connection = sqlite3.connect(db_path)
+try:
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS process_session (pid INTEGER PRIMARY KEY, proc_start_ticks INTEGER NOT NULL, session_id TEXT, directory TEXT NOT NULL, updated_at INTEGER NOT NULL, reason TEXT)"
+    )
+    connection.execute("DELETE FROM process_session WHERE pid = ?", (pid,))
+    connection.commit()
+finally:
+    connection.close()
+PY
+}
+
+cleanup() {
+  if [ "$cleanup_done" -eq 1 ]; then
+    return
+  fi
+  cleanup_done=1
+  printf 'EXIT\n' >>"$log_dir/events.txt"
+  delete_process_session || true
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --session)
+      if [ "$#" -lt 2 ]; then
+        printf '%s\n' 'fake opencode expected a session ID after --session' >&2
+        exit 1
+      fi
+      mode=resume
+      session_id=$2
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+printf 'START\n' >>"$log_dir/events.txt"
+upsert_process_session startup
+trap 'printf "INT\n" >>"$log_dir/events.txt"' INT
+trap 'exit 0' TERM
+trap 'cleanup' EXIT
+
+if [ "$mode" = "new" ]; then
+  maybe_delay_lifecycle
+  session_id=$(generate_session_id)
+  write_session_row "$session_id"
+  upsert_process_session created "$session_id"
+else
+  maybe_delay_lifecycle
+  write_session_row "$session_id"
+  upsert_process_session resumed "$session_id"
+fi
+
+printf '%s\n' "$session_id" >"$log_dir/session-id.txt"
+printf 'Fake OpenCode started: %s\n' "$session_id"
+
+while IFS= read -r line; do
+  printf 'LINE:%s\n' "$line" >>"$log_dir/events.txt"
+done
+
+printf 'EOF\n' >>"$log_dir/events.txt"
+exit 0
+"#;
 
 impl TestEnv {
     pub fn new(scope_name: &str) -> Self {
