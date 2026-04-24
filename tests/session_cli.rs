@@ -627,9 +627,20 @@ fn launch_detach_falls_back_to_directory_diff_when_process_session_table_is_miss
     let fake_opencode = env.install_fake_opencode();
     let session_name = managed_tmux_session_name(&env, "dc");
 
-    let child = spawn_new_command_with_lifecycle_delay(&env, &fake_opencode, 1500, &["new", "dc"]);
+    let mut command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut command);
+    let child = command
+        .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1500")
+        .env("OC_FAKE_OPENCODE_DISABLE_PROCESS_SESSION_TABLE", "1")
+        .args(["new", "dc"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("oc new should spawn");
     env.wait_for_tmux_session_exists(&session_name);
     wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
 
     allow_new_command_to_settle(&session_name);
     let output = child
