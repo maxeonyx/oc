@@ -236,14 +236,20 @@ impl SessionService {
         saved_session: SavedSession,
     ) -> Result<()> {
         let launch = SessionLaunch::for_saved_session(tmux, &saved_session);
-        let before_launch_ids = self.root_session_ids_before_launch(&saved_session)?;
+        let directory_compatibility_fallback_snapshot =
+            self.prepare_directory_compatibility_fallback_snapshot(&saved_session)?;
 
         if let Err(error) = self.ensure_tmux_session_running(tmux, &launch) {
             rollback_saved_session(store, &saved_session.name, error)?;
         }
 
         self.attach_to_session(tmux, &launch)?;
-        self.capture_session_id_after_attach(tmux, store, &saved_session, before_launch_ids)
+        self.capture_session_id_after_attach(
+            tmux,
+            store,
+            &saved_session,
+            directory_compatibility_fallback_snapshot,
+        )
     }
 
     fn activate_saved_session(
@@ -253,12 +259,18 @@ impl SessionService {
         saved_session: &SavedSession,
     ) -> Result<()> {
         let launch = SessionLaunch::for_saved_session(tmux, saved_session);
-        let before_launch_ids = self.root_session_ids_before_launch(saved_session)?;
+        let directory_compatibility_fallback_snapshot =
+            self.prepare_directory_compatibility_fallback_snapshot(saved_session)?;
         let launched = self.ensure_tmux_session_running(tmux, &launch)?;
         self.attach_to_session(tmux, &launch)?;
 
         if launched {
-            self.capture_session_id_after_attach(tmux, store, saved_session, before_launch_ids)?;
+            self.capture_session_id_after_attach(
+                tmux,
+                store,
+                saved_session,
+                directory_compatibility_fallback_snapshot,
+            )?;
         }
 
         Ok(())
@@ -284,7 +296,7 @@ impl SessionService {
             .with_context(|| format!("failed to attach to session '{}'", launch.session_name))
     }
 
-    fn root_session_ids_before_launch(
+    fn prepare_directory_compatibility_fallback_snapshot(
         &self,
         saved_session: &SavedSession,
     ) -> Result<Option<BTreeSet<String>>> {
@@ -312,45 +324,26 @@ impl SessionService {
         tmux: &Tmux,
         store: &mut SessionStore,
         saved_session: &SavedSession,
-        before_launch_ids: Option<BTreeSet<String>>,
+        directory_compatibility_fallback_snapshot: Option<BTreeSet<String>>,
     ) -> Result<()> {
         let tmux_session_name = tmux.managed_session_name(&saved_session.name);
         if let Some(pid) = tmux.pane_pid(&tmux_session_name)? {
-            match self.open_opencode_db().process_session_id_for_pid(pid)? {
-                ProcessSessionLookup::Available(ProcessSessionRowLookup::SessionId(session_id)) => {
-                    return self.persist_captured_session_id(store, saved_session, &session_id);
-                }
-                ProcessSessionLookup::Available(
-                    ProcessSessionRowLookup::RowMissing
-                    | ProcessSessionRowLookup::SessionIdMissing
-                    | ProcessSessionRowLookup::Stale,
-                )
-                | ProcessSessionLookup::Unavailable => return Ok(()),
-                ProcessSessionLookup::Available(ProcessSessionRowLookup::TableMissing) => {}
+            if self.capture_session_id_via_pid(store, saved_session, pid)? {
+                return Ok(());
             }
         }
 
-        let Some(before_launch_ids) = before_launch_ids else {
-            return Ok(());
-        };
-
-        let RootSessionIdLookup::Available(after_launch_ids) = self
-            .open_opencode_db()
-            .root_session_ids_for_directory(&saved_session.directory)?
+        let Some(directory_compatibility_fallback_snapshot) =
+            directory_compatibility_fallback_snapshot
         else {
             return Ok(());
         };
 
-        let new_ids = after_launch_ids
-            .difference(&before_launch_ids)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if let [captured_id] = new_ids.as_slice() {
-            self.persist_captured_session_id(store, saved_session, captured_id)?;
-        }
-
-        Ok(())
+        self.capture_session_id_via_directory_compatibility_fallback(
+            store,
+            saved_session,
+            &directory_compatibility_fallback_snapshot,
+        )
     }
 
     fn catch_up_missing_session_ids(&self, tmux: &Tmux, store: &mut SessionStore) -> Result<()> {
@@ -383,7 +376,11 @@ impl SessionService {
                         )
                         | ProcessSessionLookup::Unavailable => {}
                         ProcessSessionLookup::Available(ProcessSessionRowLookup::TableMissing) => {
-                            unreachable!("process_session table presence changed during catch-up")
+                            self.catch_up_session_id_via_directory_compatibility_fallback(
+                                &opencode_db,
+                                store,
+                                &saved_session,
+                            )?;
                         }
                     }
                 }
@@ -399,15 +396,77 @@ impl SessionService {
                 continue;
             }
 
-            let RootSessionIdLookup::Available(ids) =
-                opencode_db.root_session_ids_for_directory(&saved_session.directory)?
-            else {
-                continue;
-            };
+            self.catch_up_session_id_via_directory_compatibility_fallback(
+                &opencode_db,
+                store,
+                &saved_session,
+            )?;
+        }
 
-            if let [captured_id] = ids.iter().collect::<Vec<_>>().as_slice() {
-                self.persist_captured_session_id(store, &saved_session, captured_id.as_str())?;
+        Ok(())
+    }
+
+    fn capture_session_id_via_pid(
+        &self,
+        store: &mut SessionStore,
+        saved_session: &SavedSession,
+        pid: u32,
+    ) -> Result<bool> {
+        match self.open_opencode_db().process_session_id_for_pid(pid)? {
+            ProcessSessionLookup::Available(ProcessSessionRowLookup::SessionId(session_id)) => {
+                self.persist_captured_session_id(store, saved_session, &session_id)?;
+                Ok(true)
             }
+            // Only a missing table permits the old directory-based compatibility fallback.
+            ProcessSessionLookup::Available(ProcessSessionRowLookup::TableMissing) => Ok(false),
+            ProcessSessionLookup::Available(
+                ProcessSessionRowLookup::RowMissing
+                | ProcessSessionRowLookup::SessionIdMissing
+                | ProcessSessionRowLookup::Stale,
+            )
+            | ProcessSessionLookup::Unavailable => Ok(true),
+        }
+    }
+
+    fn capture_session_id_via_directory_compatibility_fallback(
+        &self,
+        store: &mut SessionStore,
+        saved_session: &SavedSession,
+        directory_compatibility_fallback_snapshot: &BTreeSet<String>,
+    ) -> Result<()> {
+        let RootSessionIdLookup::Available(after_launch_ids) = self
+            .open_opencode_db()
+            .root_session_ids_for_directory(&saved_session.directory)?
+        else {
+            return Ok(());
+        };
+
+        let new_ids = after_launch_ids
+            .difference(directory_compatibility_fallback_snapshot)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if let [captured_id] = new_ids.as_slice() {
+            self.persist_captured_session_id(store, saved_session, captured_id)?;
+        }
+
+        Ok(())
+    }
+
+    fn catch_up_session_id_via_directory_compatibility_fallback(
+        &self,
+        opencode_db: &OpenCodeDb,
+        store: &mut SessionStore,
+        saved_session: &SavedSession,
+    ) -> Result<()> {
+        let RootSessionIdLookup::Available(ids) =
+            opencode_db.root_session_ids_for_directory(&saved_session.directory)?
+        else {
+            return Ok(());
+        };
+
+        if let [captured_id] = ids.iter().collect::<Vec<_>>().as_slice() {
+            self.persist_captured_session_id(store, saved_session, captured_id.as_str())?;
         }
 
         Ok(())

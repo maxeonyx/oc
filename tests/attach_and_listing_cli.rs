@@ -403,6 +403,7 @@ fn hidden_session_dump_reports_running_attached_session() {
 
 #[test]
 fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_match() {
+    // Old-schema compatibility: only the legacy `session` table exists, so catch-up may still use directory matching.
     let env = TestEnv::new("catchup-single-root-match");
 
     create_saved_alias(&env, "dc", Some(env.root_dir()));

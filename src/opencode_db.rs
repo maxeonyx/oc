@@ -25,10 +25,14 @@ pub enum ProcessSessionTableLookup {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcessSessionRowLookup {
+    /// `process_session` is absent, so older OpenCode compatibility fallback is still allowed.
     TableMissing,
+    /// `process_session` exists but has no row for this pid, so directory fallback would risk wrong-session capture.
     RowMissing,
+    /// `process_session` exists and matches the pid, but the session id is not populated yet.
     SessionIdMissing,
     SessionId(String),
+    /// `process_session` exists, but the row no longer describes the current process for this pid.
     Stale,
 }
 
@@ -149,7 +153,7 @@ impl OpenCodeDb {
                 ));
             }
             Err(error) if is_unavailable_error(&error) => {
-                return Ok(ProcessSessionLookup::Unavailable)
+                return Ok(ProcessSessionLookup::Unavailable);
             }
             Err(error) => {
                 return Err(anyhow!(error)).with_context(|| {
