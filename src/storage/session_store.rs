@@ -1,5 +1,5 @@
-use anyhow::{Context, Result, anyhow, bail};
-use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, params};
+use anyhow::{anyhow, bail, Context, Result};
+use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
 use std::fs;
 use std::path::Path;
 
@@ -45,7 +45,7 @@ impl SessionStore {
             id,
             name: alias.name,
             directory: alias.directory,
-            opencode_session_id: None,
+            opencode_session_id: alias.opencode_session_id,
             opencode_args: alias.opencode_args,
         })
     }
@@ -91,6 +91,7 @@ impl SessionStore {
     pub fn save_imported_alias(&mut self, alias: NewSessionAlias) -> Result<Option<SavedSession>> {
         if let Ok(existing) = self.find_by_name(&alias.name) {
             if existing.directory == alias.directory
+                && existing.opencode_session_id == alias.opencode_session_id
                 && existing.opencode_args == alias.opencode_args
             {
                 return Ok(None);
@@ -256,9 +257,15 @@ fn insert_alias_row(transaction: &Transaction<'_>, id: i64, alias: &NewSessionAl
     match transaction.execute(
         "
         INSERT INTO sessions (id, name, directory, opencode_session_id, opencode_args)
-        VALUES (?1, ?2, ?3, NULL, ?4)
+        VALUES (?1, ?2, ?3, ?4, ?5)
         ",
-        params![id, alias.name, directory, serialized_opencode_args],
+        params![
+            id,
+            alias.name,
+            directory,
+            alias.opencode_session_id,
+            serialized_opencode_args
+        ],
     ) {
         Ok(_) => Ok(()),
         Err(error) => Err(map_insert_error(transaction, &alias.name, error)),

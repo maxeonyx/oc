@@ -50,6 +50,13 @@ fn migrate_preserves_legacy_directory_and_session_fields() {
         .success()
         .stdout(predicate::str::contains("imported 3"));
 
+    env.oc_cmd()
+        .env("OC_LEGACY_ALIASES_FILE", &legacy_aliases)
+        .arg("migrate")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skipped 3"));
+
     let saved = read_saved_sessions(env.aliases_file());
     assert_eq!(saved.len(), 3);
 

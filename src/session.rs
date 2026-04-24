@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +14,7 @@ pub struct SavedSession {
 pub struct NewSessionAlias {
     pub name: String,
     pub directory: PathBuf,
+    pub opencode_session_id: Option<String>,
     pub opencode_args: Vec<String>,
 }
 
@@ -24,8 +25,14 @@ impl NewSessionAlias {
         Ok(Self {
             name,
             directory,
+            opencode_session_id: None,
             opencode_args,
         })
+    }
+
+    pub fn with_opencode_session_id(mut self, opencode_session_id: Option<String>) -> Self {
+        self.opencode_session_id = opencode_session_id;
+        self
     }
 }
 

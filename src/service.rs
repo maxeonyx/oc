@@ -524,11 +524,43 @@ fn read_legacy_aliases_file(path: &Path) -> Result<Vec<NewSessionAlias>> {
 }
 
 fn parse_legacy_alias_line(line: &str) -> Result<NewSessionAlias> {
-    let (name, directory) = line
-        .split_once('\t')
+    let mut fields = line.splitn(3, '\t');
+    let name = fields
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Legacy alias line must contain a name: {line}"))?;
+    let directory = fields
+        .next()
         .ok_or_else(|| anyhow::anyhow!("Legacy alias line must contain a tab separator: {line}"))?;
+    let raw_args = fields.next().unwrap_or("");
+    let (opencode_session_id, opencode_args) = parse_legacy_opencode_args(raw_args);
 
-    NewSessionAlias::new(String::from(name), PathBuf::from(directory), Vec::new())
+    NewSessionAlias::new(String::from(name), PathBuf::from(directory), opencode_args)
+        .map(|alias| alias.with_opencode_session_id(opencode_session_id))
+}
+
+fn parse_legacy_opencode_args(raw_args: &str) -> (Option<String>, Vec<String>) {
+    let parts = raw_args
+        .split_whitespace()
+        .map(String::from)
+        .collect::<Vec<_>>();
+    let mut opencode_session_id = None;
+    let mut filtered_args = Vec::with_capacity(parts.len());
+    let mut index = 0;
+
+    while index < parts.len() {
+        if parts[index] == "--session" {
+            if let Some(session_id) = parts.get(index + 1) {
+                opencode_session_id = Some(session_id.clone());
+                index += 2;
+                continue;
+            }
+        }
+
+        filtered_args.push(parts[index].clone());
+        index += 1;
+    }
+
+    (opencode_session_id, filtered_args)
 }
 
 fn launch_opencode_args(saved_session: &SavedSession) -> Vec<String> {
