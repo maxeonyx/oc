@@ -5,7 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::RuntimeConfig;
-use crate::opencode_db::{OpenCodeDb, RootSessionIdLookup};
+use crate::opencode_db::{
+    OpenCodeDb, ProcessSessionLookup, ProcessSessionRowLookup, RootSessionIdLookup,
+};
 use crate::session::{NewSessionAlias, SavedSession, SessionListEntry, SessionRef};
 use crate::session_list::merge_saved_and_runtime_sessions_with_prefix;
 use crate::storage::SessionStore;
@@ -240,7 +242,7 @@ impl SessionService {
         }
 
         self.attach_to_session(tmux, &launch)?;
-        self.capture_session_id_after_attach(store, &saved_session, before_launch_ids)
+        self.capture_session_id_after_attach(tmux, store, &saved_session, before_launch_ids)
     }
 
     fn activate_saved_session(
@@ -255,7 +257,7 @@ impl SessionService {
         self.attach_to_session(tmux, &launch)?;
 
         if launched {
-            self.capture_session_id_after_attach(store, saved_session, before_launch_ids)?;
+            self.capture_session_id_after_attach(tmux, store, saved_session, before_launch_ids)?;
         }
 
         Ok(())
@@ -300,10 +302,27 @@ impl SessionService {
 
     fn capture_session_id_after_attach(
         &self,
+        tmux: &Tmux,
         store: &mut SessionStore,
         saved_session: &SavedSession,
         before_launch_ids: Option<BTreeSet<String>>,
     ) -> Result<()> {
+        let tmux_session_name = tmux.managed_session_name(&saved_session.name);
+        if let Some(pid) = tmux.pane_pid(&tmux_session_name)? {
+            match self.open_opencode_db().process_session_id_for_pid(pid)? {
+                ProcessSessionLookup::Available(ProcessSessionRowLookup::SessionId(session_id)) => {
+                    return self.persist_captured_session_id(store, saved_session, &session_id);
+                }
+                ProcessSessionLookup::Available(
+                    ProcessSessionRowLookup::RowMissing
+                    | ProcessSessionRowLookup::SessionIdMissing
+                    | ProcessSessionRowLookup::Stale,
+                )
+                | ProcessSessionLookup::Unavailable => return Ok(()),
+                ProcessSessionLookup::Available(ProcessSessionRowLookup::TableMissing) => {}
+            }
+        }
+
         let Some(before_launch_ids) = before_launch_ids else {
             return Ok(());
         };
@@ -321,14 +340,7 @@ impl SessionService {
             .collect::<Vec<_>>();
 
         if let [captured_id] = new_ids.as_slice() {
-            store
-                .update_opencode_session_id(&saved_session.name, Some(captured_id))
-                .with_context(|| {
-                    format!(
-                        "failed to persist captured OpenCode session ID for session '{}'",
-                        saved_session.name
-                    )
-                })?;
+            self.persist_captured_session_id(store, saved_session, captured_id)?;
         }
 
         Ok(())
@@ -350,18 +362,27 @@ impl SessionService {
             };
 
             if let [captured_id] = ids.iter().collect::<Vec<_>>().as_slice() {
-                store
-                    .update_opencode_session_id(&saved_session.name, Some(captured_id.as_str()))
-                    .with_context(|| {
-                        format!(
-                            "failed to catch up OpenCode session ID for session '{}'",
-                            saved_session.name
-                        )
-                    })?;
+                self.persist_captured_session_id(store, &saved_session, captured_id.as_str())?;
             }
         }
 
         Ok(())
+    }
+
+    fn persist_captured_session_id(
+        &self,
+        store: &mut SessionStore,
+        saved_session: &SavedSession,
+        captured_id: &str,
+    ) -> Result<()> {
+        store
+            .update_opencode_session_id(&saved_session.name, Some(captured_id))
+            .with_context(|| {
+                format!(
+                    "failed to persist captured OpenCode session ID for session '{}'",
+                    saved_session.name
+                )
+            })
     }
 }
 

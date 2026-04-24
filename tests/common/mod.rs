@@ -1043,23 +1043,6 @@ pub fn wait_for_opencode_process_session_absent(db_path: &Path, pid: u32, timeou
     });
 }
 
-pub fn wait_for_opencode_session_count(db_path: &Path, expected_count: usize, timeout: Duration) {
-    let description = format!(
-        "OpenCode session row count to reach {} in {}",
-        expected_count,
-        db_path.display()
-    );
-
-    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
-        let rows = read_opencode_sessions(db_path);
-        if rows.len() == expected_count {
-            WaitStatus::ready(rows, format!("row count = {}", expected_count))
-        } else {
-            WaitStatus::pending(format!("current rows: {:?}", rows))
-        }
-    });
-}
-
 pub fn insert_opencode_session(
     db_path: &Path,
     id: &str,

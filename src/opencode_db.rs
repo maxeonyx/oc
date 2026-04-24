@@ -1,12 +1,34 @@
-use anyhow::{Context, Result, anyhow};
-use rusqlite::{Connection, ErrorCode, OpenFlags, params};
+use anyhow::{anyhow, Context, Result};
+use rusqlite::{params, Connection, ErrorCode, OpenFlags};
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RootSessionIdLookup {
     Available(BTreeSet<String>),
     Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcessSessionLookup {
+    Available(ProcessSessionRowLookup),
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcessSessionRowLookup {
+    TableMissing,
+    RowMissing,
+    SessionIdMissing,
+    SessionId(String),
+    Stale,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcessSessionRow {
+    proc_start_ticks: u64,
+    session_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +102,87 @@ impl OpenCodeDb {
         Ok(RootSessionIdLookup::Available(ids))
     }
 
+    pub fn process_session_id_for_pid(&self, pid: u32) -> Result<ProcessSessionLookup> {
+        if !self.path.exists() {
+            return Ok(ProcessSessionLookup::Available(
+                ProcessSessionRowLookup::RowMissing,
+            ));
+        }
+
+        let connection =
+            match Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+                Ok(connection) => connection,
+                Err(error) => return self.handle_process_session_open_error(error),
+            };
+
+        let table_exists = match connection.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'process_session'",
+            params![],
+            |_| Ok(()),
+        ) {
+            Ok(()) => true,
+            Err(rusqlite::Error::QueryReturnedNoRows) => false,
+            Err(error) if is_unavailable_error(&error) => {
+                return Ok(ProcessSessionLookup::Unavailable)
+            }
+            Err(error) => {
+                return Err(anyhow!(error)).with_context(|| {
+                    format!(
+                        "failed to query process_session table presence in {}",
+                        self.path.display()
+                    )
+                });
+            }
+        };
+
+        if !table_exists {
+            return Ok(ProcessSessionLookup::Available(
+                ProcessSessionRowLookup::TableMissing,
+            ));
+        }
+
+        let row = match connection.query_row(
+            "SELECT proc_start_ticks, session_id FROM process_session WHERE pid = ?1",
+            params![pid],
+            |row| {
+                Ok(ProcessSessionRow {
+                    proc_start_ticks: row.get(0)?,
+                    session_id: row.get(1)?,
+                })
+            },
+        ) {
+            Ok(row) => row,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Ok(ProcessSessionLookup::Available(
+                    ProcessSessionRowLookup::RowMissing,
+                ));
+            }
+            Err(error) if is_unavailable_error(&error) => {
+                return Ok(ProcessSessionLookup::Unavailable)
+            }
+            Err(error) => {
+                return Err(anyhow!(error)).with_context(|| {
+                    format!(
+                        "failed to query process_session row for pid {} from {}",
+                        pid,
+                        self.path.display()
+                    )
+                });
+            }
+        };
+
+        if !process_start_ticks_match(pid, row.proc_start_ticks)? {
+            return Ok(ProcessSessionLookup::Available(
+                ProcessSessionRowLookup::Stale,
+            ));
+        }
+
+        Ok(ProcessSessionLookup::Available(match row.session_id {
+            Some(session_id) => ProcessSessionRowLookup::SessionId(session_id),
+            None => ProcessSessionRowLookup::SessionIdMissing,
+        }))
+    }
+
     fn handle_open_error(&self, error: rusqlite::Error) -> Result<RootSessionIdLookup> {
         if is_unavailable_error(&error) {
             return Ok(RootSessionIdLookup::Unavailable);
@@ -88,6 +191,37 @@ impl OpenCodeDb {
         Err(anyhow!(error))
             .with_context(|| format!("failed to open OpenCode database {}", self.path.display()))
     }
+
+    fn handle_process_session_open_error(
+        &self,
+        error: rusqlite::Error,
+    ) -> Result<ProcessSessionLookup> {
+        if is_unavailable_error(&error) {
+            return Ok(ProcessSessionLookup::Unavailable);
+        }
+
+        Err(anyhow!(error))
+            .with_context(|| format!("failed to open OpenCode database {}", self.path.display()))
+    }
+}
+
+fn process_start_ticks_match(pid: u32, expected_ticks: u64) -> Result<bool> {
+    let stat_path = PathBuf::from(format!("/proc/{pid}/stat"));
+    let contents = match fs::read_to_string(&stat_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to read process stat file {}", stat_path.display())
+            });
+        }
+    };
+
+    Ok(parse_proc_start_ticks(&contents) == Some(expected_ticks))
+}
+
+fn parse_proc_start_ticks(stat_contents: &str) -> Option<u64> {
+    stat_contents.split_whitespace().nth(21)?.parse().ok()
 }
 
 fn is_unavailable_error(error: &rusqlite::Error) -> bool {

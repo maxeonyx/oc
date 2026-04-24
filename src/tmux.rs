@@ -1,8 +1,8 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{IsTerminal, stdin, stdout};
+use std::io::{stdin, stdout, IsTerminal};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -157,6 +157,10 @@ impl Tmux {
             .filter_map(|line| parse_managed_session_line(line, &self.prefix))
             .map(enrich_runtime)
             .collect())
+    }
+
+    pub fn pane_pid(&self, session_name: &str) -> Result<Option<u32>> {
+        pane_pid(session_name)
     }
 
     fn send_keys_if_running(&self, session_name: &str, keys: &[&str]) -> Result<()> {
