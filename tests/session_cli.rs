@@ -5,7 +5,8 @@ use common::{
     read_saved_sessions, tmux_pane_current_command, tmux_pane_pid, wait_for_file_contains,
     wait_for_file_exists, wait_for_opencode_process_session,
     wait_for_opencode_process_session_absent, wait_for_opencode_process_session_state,
-    wait_for_tmux_client_detach_window, FakeOpenCode, SavedSessionRow, TestEnv,
+    wait_for_opencode_session_count, wait_for_tmux_client_detach_window, FakeOpenCode,
+    SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -555,4 +556,216 @@ fn restart_uses_captured_session_id() {
         fs::read_to_string(fake_opencode.args_log_path()).expect("args log should be readable"),
         format!("--session\n{captured_id}\n")
     );
+}
+
+#[test]
+fn launch_detach_captures_session_id_by_pid_when_session_table_is_unavailable() {
+    let env = TestEnv::new("capture-session-id-by-pid-without-session-table");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    let child = spawn_new_command_with_lifecycle_delay(&env, &fake_opencode, 1500, &["new", "dc"]);
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+
+    let fake_pid = pid_logged_by_fake(&fake_opencode);
+    let startup_row = wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        fake_pid,
+        Duration::from_secs(5),
+        "to stay startup while session table is absent",
+        |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
+    );
+    assert_eq!(startup_row.pid, fake_pid);
+
+    allow_new_command_to_settle(&session_name);
+    let output = child
+        .wait_with_output()
+        .expect("oc new process should exit after attach handling completes");
+    assert!(
+        output.status.success(),
+        "Expected oc new to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    let captured_id = read_captured_session_id(&fake_opencode);
+
+    assert_saved_sessions(
+        &env,
+        vec![SavedSessionRow {
+            id: 1,
+            name: String::from("dc"),
+            directory: env.root_dir().to_path_buf(),
+            opencode_session_id: Some(captured_id.clone()),
+            opencode_args: String::from(EMPTY_ARGS_JSON),
+        }],
+    );
+
+    let process_rows = read_opencode_process_sessions(env.opencode_db());
+    assert_eq!(process_rows.len(), 1);
+    assert_eq!(process_rows[0].pid, fake_pid);
+    assert_eq!(
+        process_rows[0].session_id.as_deref(),
+        Some(captured_id.as_str())
+    );
+
+    let session_rows = read_opencode_sessions(env.opencode_db());
+    assert!(
+        session_rows.is_empty(),
+        "expected PID-only capture coverage with no session table rows, got {session_rows:?}"
+    );
+}
+
+#[test]
+fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
+    let env = TestEnv::new("restart-uses-captured-id-without-session-table");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    let mut new_command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut new_command);
+    let child = new_command
+        .env("OC_FAKE_OPENCODE_DISABLE_SESSION_TABLE", "1")
+        .args(["new", "dc"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("oc new should spawn");
+
+    env.wait_for_tmux_session_exists(&session_name);
+    allow_new_command_to_settle(&session_name);
+    let output = child
+        .wait_with_output()
+        .expect("oc new process should exit after attach handling completes");
+    assert!(
+        output.status.success(),
+        "Expected oc new to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    let captured_id = read_captured_session_id(&fake_opencode);
+    let process_rows = read_opencode_process_sessions(env.opencode_db());
+    assert_eq!(process_rows.len(), 1);
+    assert_eq!(
+        process_rows[0].session_id.as_deref(),
+        Some(captured_id.as_str())
+    );
+    assert!(read_opencode_sessions(env.opencode_db()).is_empty());
+
+    let mut restart_command = env.oc_cmd();
+    fake_opencode.apply_to_assert_cmd(&mut restart_command);
+    restart_command
+        .env("OC_FAKE_OPENCODE_DISABLE_SESSION_TABLE", "1")
+        .args(["restart", "dc"])
+        .assert()
+        .success();
+    wait_for_file_exists(&fake_opencode.args_log_path(), Duration::from_secs(5));
+
+    assert_eq!(
+        fs::read_to_string(fake_opencode.args_log_path()).expect("args log should be readable"),
+        format!("--session\n{captured_id}\n")
+    );
+}
+
+#[test]
+fn concurrent_same_directory_sessions_capture_distinct_ids_by_pid() {
+    let env = TestEnv::new("concurrent-same-dir-captures-distinct-ids-by-pid");
+    let fake_opencode = env.install_fake_opencode();
+
+    let session_one = managed_tmux_session_name(&env, "one");
+    let session_two = managed_tmux_session_name(&env, "two");
+
+    let mut first_command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut first_command);
+    let first_child = first_command
+        .env("OC_FAKE_OPENCODE_DISABLE_SESSION_TABLE", "1")
+        .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1800")
+        .args(["new", "one"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("first oc new should spawn");
+
+    env.wait_for_tmux_session_exists(&session_one);
+    let first_pid = tmux_pane_pid(&session_one);
+    wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        first_pid,
+        Duration::from_secs(5),
+        "to be startup-only before second launch",
+        |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
+    );
+
+    let mut second_command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut second_command);
+    let second_child = second_command
+        .env("OC_FAKE_OPENCODE_DISABLE_SESSION_TABLE", "1")
+        .args(["new", "two"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("second oc new should spawn");
+
+    env.wait_for_tmux_session_exists(&session_two);
+    wait_for_opencode_session_count(env.opencode_db(), 0, Duration::from_secs(1));
+
+    allow_new_command_to_settle(&session_two);
+    let second_output = second_child
+        .wait_with_output()
+        .expect("second oc new process should exit after attach handling completes");
+    assert!(
+        second_output.status.success(),
+        "Expected second oc new to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&second_output.stdout),
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+
+    allow_new_command_to_settle(&session_one);
+    let first_output = first_child
+        .wait_with_output()
+        .expect("first oc new process should exit after attach handling completes");
+    assert!(
+        first_output.status.success(),
+        "Expected first oc new to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&first_output.stdout),
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+
+    let saved_rows = read_saved_sessions(env.aliases_file());
+    assert_eq!(saved_rows.len(), 2);
+    let first_saved = saved_rows
+        .iter()
+        .find(|row| row.name == "one")
+        .expect("saved row for first session should exist");
+    let second_saved = saved_rows
+        .iter()
+        .find(|row| row.name == "two")
+        .expect("saved row for second session should exist");
+
+    let process_rows = read_opencode_process_sessions(env.opencode_db());
+    assert_eq!(process_rows.len(), 2);
+    let first_process = process_rows
+        .iter()
+        .find(|row| row.pid == first_pid)
+        .expect("first process row should exist");
+    let second_pid = tmux_pane_pid(&session_two);
+    let second_process = process_rows
+        .iter()
+        .find(|row| row.pid == second_pid)
+        .expect("second process row should exist");
+
+    assert_eq!(first_saved.opencode_session_id, first_process.session_id);
+    assert_eq!(second_saved.opencode_session_id, second_process.session_id);
+    assert_ne!(
+        first_saved.opencode_session_id,
+        second_saved.opencode_session_id
+    );
+    assert!(read_opencode_sessions(env.opencode_db()).is_empty());
 }

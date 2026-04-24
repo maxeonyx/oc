@@ -518,6 +518,7 @@ set -eu
 log_dir="${OC_FAKE_OPENCODE_LOG_DIR:?}"
 opencode_db="${OC_OPENCODE_DB:?}"
 lifecycle_delay_ms="${OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS:-0}"
+disable_session_table="${OC_FAKE_OPENCODE_DISABLE_SESSION_TABLE:-0}"
 mode=new
 session_id=
 cleanup_done=0
@@ -546,6 +547,9 @@ PY
 }
 
 write_session_row() {
+  if [ "$disable_session_table" = "1" ]; then
+    return
+  fi
   python3 - "$opencode_db" "$PWD" "$1" <<'PY'
 import sqlite3
 import sys
@@ -1035,6 +1039,23 @@ pub fn wait_for_opencode_process_session_absent(db_path: &Path, pid: u32, timeou
             WaitStatus::pending(format!("rows present: {:?}", rows))
         } else {
             WaitStatus::ready((), format!("pid {} absent", pid))
+        }
+    });
+}
+
+pub fn wait_for_opencode_session_count(db_path: &Path, expected_count: usize, timeout: Duration) {
+    let description = format!(
+        "OpenCode session row count to reach {} in {}",
+        expected_count,
+        db_path.display()
+    );
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let rows = read_opencode_sessions(db_path);
+        if rows.len() == expected_count {
+            WaitStatus::ready(rows, format!("row count = {}", expected_count))
+        } else {
+            WaitStatus::pending(format!("current rows: {:?}", rows))
         }
     });
 }
