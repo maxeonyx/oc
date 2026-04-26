@@ -63,10 +63,11 @@ impl Tmux {
     }
 
     pub fn session_exists(&self, session_name: &str) -> Result<bool> {
+        let exact_session_name = exact_session_target(session_name);
         let output = Command::new("tmux")
             .arg("has-session")
             .arg("-t")
-            .arg(session_name)
+            .arg(&exact_session_name)
             .output()
             .with_context(|| {
                 format!("failed to check whether tmux session '{session_name}' exists")
@@ -94,7 +95,10 @@ impl Tmux {
         }
 
         let mut command = Command::new("tmux");
-        command.arg("kill-session").arg("-t").arg(session_name);
+        command
+            .arg("kill-session")
+            .arg("-t")
+            .arg(exact_session_target(session_name));
 
         run_tmux_checked(command, format!("kill tmux session '{session_name}'"))?;
 
@@ -180,7 +184,7 @@ impl Tmux {
         command
             .arg("send-keys")
             .arg("-t")
-            .arg(session_name)
+            .arg(exact_pane_target(session_name))
             .args(keys);
 
         run_tmux_checked(
@@ -222,12 +226,13 @@ fn run_tmux_interactive_checked(mut command: Command, description: String) -> Re
 
 fn wait_for_session_exit(session_name: &str, timeout: std::time::Duration) -> Result<()> {
     let deadline = std::time::Instant::now() + timeout;
+    let exact_session_name = exact_session_target(session_name);
 
     while std::time::Instant::now() < deadline {
         let output = Command::new("tmux")
             .arg("has-session")
             .arg("-t")
-            .arg(session_name)
+            .arg(&exact_session_name)
             .output()
             .with_context(|| {
                 format!("failed to check whether tmux session '{session_name}' still exists")
@@ -249,10 +254,17 @@ fn wait_for_session_exit(session_name: &str, timeout: std::time::Duration) -> Re
 
 fn wait_for_pane(session_name: &str, timeout: std::time::Duration) -> Result<()> {
     let deadline = std::time::Instant::now() + timeout;
+    let exact_pane_name = exact_pane_target(session_name);
 
     while std::time::Instant::now() < deadline {
         let output = Command::new("tmux")
-            .args(["display-message", "-p", "-t", session_name, "#{pane_id}"])
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                &exact_pane_name,
+                "#{pane_id}",
+            ])
             .output()
             .with_context(|| format!("failed to wait for tmux pane in session '{session_name}'"))?;
 
@@ -297,7 +309,10 @@ fn new_session_command(session_name: &str, directory: &Path, opencode_args: &[St
 
 fn attach_session_command(session_name: &str) -> Command {
     let mut command = Command::new("tmux");
-    command.arg("attach-session").arg("-t").arg(session_name);
+    command
+        .arg("attach-session")
+        .arg("-t")
+        .arg(exact_session_target(session_name));
     command
 }
 
@@ -308,7 +323,7 @@ fn attach_session_with_pty_command(session_name: &str) -> Command {
         .arg(
             "import os, pty, sys; pid, _ = pty.fork();\nif pid == 0: os.execvp('tmux', ['tmux', 'attach-session', '-t', sys.argv[1]]);\n_, status = os.waitpid(pid, 0); raise SystemExit(os.waitstatus_to_exitcode(status))",
         )
-        .arg(session_name)
+        .arg(exact_session_target(session_name))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -346,7 +361,13 @@ fn enrich_runtime(mut runtime: ManagedSessionRuntime) -> ManagedSessionRuntime {
 
 fn pane_pid(session_name: &str) -> Result<Option<u32>> {
     let output = Command::new("tmux")
-        .args(["display-message", "-p", "-t", session_name, "#{pane_pid}"])
+        .args([
+            "display-message",
+            "-p",
+            "-t",
+            &exact_pane_target(session_name),
+            "#{pane_pid}",
+        ])
         .output()
         .with_context(|| format!("failed to read pane pid for tmux session '{session_name}'"))?;
 
@@ -383,4 +404,12 @@ pub fn is_tmux_server_unavailable_error(stderr: &str) -> bool {
 
 fn is_tmux_missing_session_error(stderr: &str) -> bool {
     stderr.contains("can't find session")
+}
+
+fn exact_session_target(session_name: &str) -> String {
+    format!("={session_name}")
+}
+
+fn exact_pane_target(session_name: &str) -> String {
+    format!("={session_name}:")
 }
