@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, ErrorCode, OpenFlags};
 use std::collections::BTreeSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -57,34 +58,35 @@ impl OpenCodeDb {
             return Ok(RootSessionIdLookup::Available(BTreeSet::new()));
         }
 
+        let normalized_directory = normalize_directory_for_match(directory);
+
         let connection =
             match Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
                 Ok(connection) => connection,
                 Err(error) => return self.handle_open_error(error),
             };
 
-        let mut statement = match connection
-            .prepare("SELECT id FROM session WHERE directory = ?1 AND parent_id IS NULL")
-        {
-            Ok(statement) => statement,
-            Err(error) if is_missing_session_table_error(&error) => {
-                return Ok(RootSessionIdLookup::Available(BTreeSet::new()));
-            }
-            Err(error) if is_unavailable_error(&error) => {
-                return Ok(RootSessionIdLookup::Unavailable);
-            }
-            Err(error) => {
-                return Err(anyhow!(error)).with_context(|| {
-                    format!(
-                        "failed to prepare OpenCode session query against {}",
-                        self.path.display()
-                    )
-                });
-            }
-        };
+        let mut statement =
+            match connection.prepare("SELECT id, directory FROM session WHERE parent_id IS NULL") {
+                Ok(statement) => statement,
+                Err(error) if is_missing_session_table_error(&error) => {
+                    return Ok(RootSessionIdLookup::Available(BTreeSet::new()));
+                }
+                Err(error) if is_unavailable_error(&error) => {
+                    return Ok(RootSessionIdLookup::Unavailable);
+                }
+                Err(error) => {
+                    return Err(anyhow!(error)).with_context(|| {
+                        format!(
+                            "failed to prepare OpenCode session query against {}",
+                            self.path.display()
+                        )
+                    });
+                }
+            };
 
-        let rows = match statement.query_map(params![directory.display().to_string()], |row| {
-            row.get::<_, String>(0)
+        let rows = match statement.query_map(params![], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         }) {
             Ok(rows) => rows,
             Err(error) if is_unavailable_error(&error) => {
@@ -102,12 +104,16 @@ impl OpenCodeDb {
 
         let mut ids = BTreeSet::new();
         for row in rows {
-            ids.insert(row.with_context(|| {
+            let (id, row_directory) = row.with_context(|| {
                 format!(
                     "failed to decode OpenCode session ID row from {}",
                     self.path.display()
                 )
-            })?);
+            })?;
+
+            if normalize_directory_for_match(Path::new(&row_directory)) == normalized_directory {
+                ids.insert(id);
+            }
         }
 
         Ok(RootSessionIdLookup::Available(ids))
@@ -264,6 +270,20 @@ fn process_start_ticks_match(pid: u32, expected_ticks: u64) -> Result<bool> {
 
 fn parse_proc_start_ticks(stat_contents: &str) -> Option<u64> {
     stat_contents.split_whitespace().nth(21)?.parse().ok()
+}
+
+fn normalize_directory_for_match(directory: &Path) -> PathBuf {
+    expand_tilde_path(directory).unwrap_or_else(|| directory.to_path_buf())
+}
+
+fn expand_tilde_path(path: &Path) -> Option<PathBuf> {
+    let path_str = path.to_str()?;
+    if path_str == "~" {
+        return env::var_os("HOME").map(PathBuf::from);
+    }
+
+    let remainder = path_str.strip_prefix("~/")?;
+    env::var_os("HOME").map(|home| PathBuf::from(home).join(remainder))
 }
 
 fn is_unavailable_error(error: &rusqlite::Error) -> bool {

@@ -360,6 +360,11 @@ impl SessionService {
                     let tmux_session_name =
                         saved_session.managed_tmux_session_name(tmux.managed_session_prefix());
                     let Some(pid) = tmux.pane_pid(&tmux_session_name)? else {
+                        self.catch_up_session_id_via_directory_compatibility_fallback(
+                            &opencode_db,
+                            store,
+                            &saved_session,
+                        )?;
                         continue;
                     };
 
@@ -372,16 +377,16 @@ impl SessionService {
                         ProcessSessionLookup::Available(
                             ProcessSessionRowLookup::RowMissing
                             | ProcessSessionRowLookup::SessionIdMissing
-                            | ProcessSessionRowLookup::Stale,
-                        )
-                        | ProcessSessionLookup::Unavailable => {}
-                        ProcessSessionLookup::Available(ProcessSessionRowLookup::TableMissing) => {
+                            | ProcessSessionRowLookup::TableMissing,
+                        ) => {
                             self.catch_up_session_id_via_directory_compatibility_fallback(
                                 &opencode_db,
                                 store,
                                 &saved_session,
                             )?;
                         }
+                        ProcessSessionLookup::Available(ProcessSessionRowLookup::Stale)
+                        | ProcessSessionLookup::Unavailable => {}
                     }
                 }
 
