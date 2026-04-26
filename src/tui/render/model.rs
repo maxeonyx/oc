@@ -6,8 +6,9 @@ use ratatui::text::{Line, Span};
 
 use crate::session::SessionStatus;
 
+use super::layout;
 use super::theme::Theme;
-use crate::tui::format::{ColumnWidths, format_column_row, format_memory};
+use crate::tui::format::{format_column_row, format_memory, ColumnWidths};
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
     ActionState, CursorPosition, DashboardAction, DashboardGroup, DashboardRow, DashboardSnapshot,
@@ -20,6 +21,7 @@ const SESSION_FOOTER_LINES: usize = 2;
 const SESSION_HEADER_LINES: usize = 1;
 const BUTTON_MIN_WIDTH: usize = 8;
 const BUTTON_SPACING: usize = 2;
+const SCROLL_MARGIN: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HorizontalMetrics {
@@ -124,10 +126,9 @@ impl SessionTable {
         theme: &Theme,
     ) -> Self {
         let sections = session_rows(state, widths, content_width, theme);
-        let selected_body_index = selected_body_line_index(state);
 
         Self {
-            body_scroll: selected_body_index.min(sections.body_rows.len().saturating_sub(1)),
+            body_scroll: state.list_body_scroll(),
             header: sections.header,
             body_rows: sections.body_rows,
             footer_rows: sections.footer_rows,
@@ -166,6 +167,59 @@ impl SessionTable {
             .chain(footer)
             .collect()
     }
+}
+
+pub fn list_body_space(area: Rect, state: &DashboardState) -> usize {
+    let metrics = dashboard_metrics(state);
+    let render_model = RenderModel::from_state(state, metrics.horizontal);
+    let dashboard_layout = layout::compute_layout(area, &render_model, metrics);
+
+    dashboard_layout
+        .list
+        .content
+        .height
+        .saturating_sub((SESSION_HEADER_LINES + SESSION_FOOTER_LINES) as u16) as usize
+}
+
+pub fn body_scroll_for_state(
+    state: &DashboardState,
+    current_scroll: usize,
+    body_space: usize,
+) -> usize {
+    let body_rows = session_body_line_count(&state.view.groups);
+    let selected_body_index = selected_body_line_index(state);
+    body_scroll_for_selection(body_rows, selected_body_index, current_scroll, body_space)
+}
+
+pub fn body_scroll_for_selection(
+    body_rows: usize,
+    selected_body_index: usize,
+    current_scroll: usize,
+    body_space: usize,
+) -> usize {
+    if body_space == 0 || body_rows <= body_space {
+        return 0;
+    }
+
+    let max_scroll = body_rows.saturating_sub(body_space);
+    let margin = effective_scroll_margin(body_space);
+    let mut scroll = current_scroll.min(max_scroll);
+    let top_band = scroll.saturating_add(margin);
+
+    if selected_body_index < top_band {
+        scroll = selected_body_index.saturating_sub(margin);
+    }
+
+    let visible_end = scroll + body_space.saturating_sub(1);
+    let bottom_band = visible_end.saturating_sub(margin);
+    if selected_body_index > bottom_band {
+        scroll = selected_body_index
+            .saturating_add(margin)
+            .saturating_add(1)
+            .saturating_sub(body_space);
+    }
+
+    scroll.min(max_scroll)
 }
 
 struct SessionTableRows {
@@ -675,6 +729,18 @@ fn selected_body_line_index(state: &DashboardState) -> usize {
         }
     }
     0
+}
+
+fn session_body_line_count(groups: &[DashboardGroup]) -> usize {
+    groups
+        .iter()
+        .map(|group| group.sessions.len() + usize::from(group.title.is_some()))
+        .sum()
+}
+
+fn effective_scroll_margin(body_space: usize) -> usize {
+    let max_margin = body_space.saturating_sub(1) / 2;
+    SCROLL_MARGIN.min(max_margin)
 }
 
 fn input_cursor_offset(state: &DashboardState) -> u16 {

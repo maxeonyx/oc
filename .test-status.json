@@ -58,6 +58,7 @@
     "oc::session_cli$stop_fails_cleanly_when_target_not_found": "passing",
     "oc::session_cli$stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias": "passing",
     "oc::tui_logic$available_actions_depend_on_row_status": "passing",
+    "oc::tui_logic$body_scroll_uses_margin_band_and_resets_cleanly_for_small_viewports": "pending",
     "oc::tui_logic$command_parser_rejects_invalid_input": "passing",
     "oc::tui_logic$command_parser_supports_dashboard_commands": "passing",
     "oc::tui_logic$default_selection_prefers_directory_match_first": "passing",

@@ -1,8 +1,9 @@
 use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
-use oc::tui::command::{CommandParseError, parse_command};
+use oc::tui::command::{parse_command, CommandParseError};
 use oc::tui::filter::{build_view, summary_for_view, totals_for_rows, totals_scope_label};
 use oc::tui::format::abbreviate_directory;
+use oc::tui::render::body_scroll_for_selection;
 use oc::tui::selection::{
     cycle_action_for_row, preferred_action_for_row, select_index, select_index_for_input,
 };
@@ -451,6 +452,27 @@ fn persistent_action_auto_advances_and_cycles_skip_unavailable_actions() {
         cycle_action_for_row(saved_row, DashboardAction::Attach, -1),
         DashboardAction::Attach
     );
+}
+
+#[test]
+fn body_scroll_uses_margin_band_and_resets_cleanly_for_small_viewports() {
+    let body_rows = 15;
+    let body_space = 7;
+
+    assert_eq!(body_scroll_for_selection(body_rows, 0, 0, body_space), 0);
+    assert_eq!(body_scroll_for_selection(body_rows, 1, 0, body_space), 0);
+    assert_eq!(body_scroll_for_selection(body_rows, 2, 0, body_space), 0);
+    assert_eq!(body_scroll_for_selection(body_rows, 3, 0, body_space), 0);
+    assert_eq!(body_scroll_for_selection(body_rows, 4, 0, body_space), 1);
+
+    assert_eq!(body_scroll_for_selection(body_rows, 6, 1, body_space), 3);
+    assert_eq!(body_scroll_for_selection(body_rows, 5, 3, body_space), 2);
+    assert_eq!(body_scroll_for_selection(body_rows, 2, 3, body_space), 0);
+
+    assert_eq!(body_scroll_for_selection(body_rows, 2, 0, 3), 1);
+    assert_eq!(body_scroll_for_selection(body_rows, 3, 0, 3), 2);
+    assert_eq!(body_scroll_for_selection(body_rows, 1, 1, 3), 0);
+    assert_eq!(body_scroll_for_selection(body_rows, 0, 1, 3), 0);
 }
 
 fn session_entry(

@@ -3,14 +3,17 @@ mod model;
 mod theme;
 
 use ratatui::widgets::{Clear, Paragraph, Widget};
-use ratatui::{Frame, layout::Rect, style::Style, text::Line};
+use ratatui::{layout::Rect, style::Style, text::Line, Frame};
 
 use super::state::DashboardState;
-use layout::{SurfaceLayout, compute_layout};
+use layout::{compute_layout, SurfaceLayout};
 use model::RenderModel;
 
-pub use model::{DashboardMetrics, HorizontalMetrics, dashboard_metrics};
-pub use theme::{Theme, detect_theme};
+pub use model::{
+    body_scroll_for_selection, body_scroll_for_state, dashboard_metrics, list_body_space,
+    DashboardMetrics, HorizontalMetrics,
+};
+pub use theme::{detect_theme, Theme};
 
 pub fn render(frame: &mut Frame<'_>, state: &DashboardState) {
     let metrics = model::dashboard_metrics(state);
