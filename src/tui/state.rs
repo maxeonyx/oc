@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+use ratatui::Terminal;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -15,14 +16,14 @@ use crate::cli::RequestedAction;
 use crate::commands;
 use crate::service::SessionService;
 
-use super::command::{CommandParseError, parse_command};
+use super::command::{parse_command, CommandParseError};
 use super::filter::{build_view, summary_for_view, totals_scope_label};
-use super::input::{InputIntent, map_key_event};
+use super::input::{map_key_event, InputIntent};
 use super::render;
 use super::render::Theme;
 use super::selection::{
-    SelectedSession, available_actions, cycle_action_for_row, default_selected_identity,
-    index_for_selected_identity, preferred_action_for_row, selected_identity_at,
+    available_actions, cycle_action_for_row, default_selected_identity,
+    index_for_selected_identity, preferred_action_for_row, selected_identity_at, SelectedSession,
 };
 use super::types::{
     DashboardAction, DashboardSnapshot, DashboardSummary, DashboardView, InputMode,
@@ -40,6 +41,8 @@ pub struct DashboardState {
     pub status_message: Option<String>,
     pub current_directory: Option<PathBuf>,
     pub theme: Theme,
+    list_body_scroll: usize,
+    terminal_area: Rect,
     pending_restart: Option<PendingRestart>,
     selected_identity: Option<SelectedSession>,
 }
@@ -60,6 +63,7 @@ pub fn run(service: &SessionService, status_message: Option<String>) -> Result<(
         String::new(),
         status_message,
         theme,
+        terminal.size()?,
     )?;
     let mut last_refresh = Instant::now();
 
@@ -82,7 +86,9 @@ pub fn run(service: &SessionService, status_message: Option<String>) -> Result<(
                     }
                     last_refresh = Instant::now();
                 }
-                Event::Resize(_, _) => {}
+                Event::Resize(width, height) => {
+                    state.set_terminal_area(Rect::new(0, 0, width, height));
+                }
                 _ => {}
             }
         }
@@ -137,6 +143,7 @@ impl DashboardState {
         input_text: String,
         status_message: Option<String>,
         theme: Theme,
+        terminal_area: Rect,
     ) -> Result<Self> {
         let current_directory = std::env::current_dir().ok();
         let snapshot = DashboardSnapshot::from_session_entries(service.list_dashboard_sessions()?);
@@ -161,6 +168,8 @@ impl DashboardState {
             status_message,
             current_directory,
             theme,
+            list_body_scroll: 0,
+            terminal_area,
             pending_restart: None,
             selected_identity,
         };
@@ -186,11 +195,16 @@ impl DashboardState {
         self.selected_identity
     }
 
+    pub fn list_body_scroll(&self) -> usize {
+        self.list_body_scroll
+    }
+
     pub fn move_selection_up(&mut self) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
             self.selected_identity = selected_identity_at(&self.view, self.selected_index);
             self.reconcile_selected_action();
+            self.reconcile_scroll(false);
         }
     }
 
@@ -199,6 +213,7 @@ impl DashboardState {
             self.selected_index += 1;
             self.selected_identity = selected_identity_at(&self.view, self.selected_index);
             self.reconcile_selected_action();
+            self.reconcile_scroll(false);
         }
     }
 
@@ -262,6 +277,11 @@ impl DashboardState {
         totals_scope_label(self.input_mode, &self.input_text)
     }
 
+    fn set_terminal_area(&mut self, terminal_area: Rect) {
+        self.terminal_area = terminal_area;
+        self.reconcile_scroll(false);
+    }
+
     fn reconcile_selected_action(&mut self) {
         if let Some(row) = self.selected_row() {
             self.selected_action = preferred_action_for_row(row, self.selected_action);
@@ -294,6 +314,7 @@ impl DashboardState {
                         String::new(),
                         None,
                         self.theme,
+                        self.terminal_area,
                     )?;
                 }
             },
@@ -354,30 +375,28 @@ impl DashboardState {
             self.input_mode,
             self.current_directory.clone(),
         );
-        self.reconcile_selection(filter_text_changed);
+        let reset_scroll = self.reconcile_selection(filter_text_changed);
         self.reconcile_selected_action();
+        self.reconcile_scroll(reset_scroll);
     }
 
-    fn reconcile_selection(&mut self, filter_text_changed: bool) {
+    fn reconcile_selection(&mut self, filter_text_changed: bool) -> bool {
         let visible_count = self.view.sessions().count();
         if visible_count == 0 {
             self.selected_index = 0;
             self.selected_identity = None;
-            return;
+            return true;
         }
 
         if let Some(index) = index_for_selected_identity(&self.view, self.selected_identity) {
             self.selected_index = index;
-            return;
+            return false;
         }
 
-        self.selected_identity = if self.has_active_filter() {
-            if filter_text_changed {
-                selected_identity_at(&self.view, 0)
-            } else {
-                default_selected_identity(&self.view, self.current_directory.as_deref())
-                    .or_else(|| selected_identity_at(&self.view, 0))
-            }
+        let snapped_to_top = self.has_active_filter() && filter_text_changed;
+
+        self.selected_identity = if snapped_to_top {
+            selected_identity_at(&self.view, 0)
         } else {
             default_selected_identity(&self.view, self.current_directory.as_deref())
                 .or_else(|| selected_identity_at(&self.view, 0))
@@ -385,6 +404,17 @@ impl DashboardState {
 
         self.selected_index =
             index_for_selected_identity(&self.view, self.selected_identity).unwrap_or(0);
+
+        snapped_to_top
+    }
+
+    fn reconcile_scroll(&mut self, reset_to_top: bool) {
+        let body_space = render::list_body_space(self.terminal_area, self);
+        self.list_body_scroll = if reset_to_top {
+            0
+        } else {
+            render::body_scroll_for_state(self, self.list_body_scroll, body_space)
+        };
     }
 
     fn begin_restart(&mut self, service: &SessionService, target: String) {
@@ -498,6 +528,14 @@ impl TerminalGuard {
         self.terminal.clear().context("failed to clear terminal")?;
         Ok(())
     }
+
+    fn size(&self) -> Result<Rect> {
+        let size = self
+            .terminal
+            .size()
+            .context("failed to read terminal size")?;
+        Ok(Rect::new(0, 0, size.width, size.height))
+    }
 }
 
 impl Drop for TerminalGuard {
@@ -538,6 +576,7 @@ fn run_interactive_action(
         String::new(),
         status_message,
         theme,
+        terminal.size()?,
     )?;
 
     Ok(())
