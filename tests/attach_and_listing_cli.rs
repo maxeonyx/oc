@@ -202,6 +202,24 @@ fn bare_target_launches_saved_alias_by_name_when_tmux_session_is_missing() {
 }
 
 #[test]
+fn bare_target_launches_exact_session_when_longer_prefix_match_exists() {
+    let env = TestEnv::new("bare-target-launches-exact-session");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+    let colliding_session_name = format!("{}dc-1163-something", env.tmux_prefix());
+
+    create_saved_alias(&env, "dc", None);
+    create_tmux_session_in_dir(&colliding_session_name, env.root_dir());
+
+    assert_interactive_oc_command_launches_and_succeeds_after_detach(
+        &env,
+        &fake_opencode,
+        &["dc"],
+        &session_name,
+    );
+}
+
+#[test]
 fn bare_target_launches_saved_alias_by_numeric_id_when_tmux_session_is_missing() {
     let env = TestEnv::new("bare-target-launches-by-id");
     let fake_opencode = env.install_fake_opencode();

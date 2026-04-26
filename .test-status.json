@@ -71,6 +71,7 @@
     "oc::tui_logic$summary_counts_react_to_filter_but_not_command_mode": "passing",
     "oc::tui_logic$totals_only_count_session_rows": "passing",
     "oc::tui_logic$totals_scope_label_depends_on_filter_state": "passing",
-    "oc::version_smoke$version_flag_prints_package_version": "passing"
+    "oc::version_smoke$version_flag_prints_package_version": "passing",
+    "oc::attach_and_listing_cli$bare_target_launches_exact_session_when_longer_prefix_match_exists": "pending"
   }
 }
