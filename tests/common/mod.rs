@@ -1103,6 +1103,38 @@ pub fn insert_opencode_session(
         });
 }
 
+pub fn ensure_opencode_process_session_table(db_path: &Path) {
+    let parent = db_path
+        .parent()
+        .unwrap_or_else(|| panic!("OpenCode db path should have parent: {}", db_path.display()));
+    fs::create_dir_all(parent)
+        .unwrap_or_else(|error| panic!("Failed to create {}: {}", parent.display(), error));
+
+    let connection = Connection::open(db_path)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS process_session (
+                pid INTEGER PRIMARY KEY,
+                proc_start_ticks INTEGER NOT NULL,
+                session_id TEXT,
+                directory TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                reason TEXT
+            );
+            ",
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "Failed to initialize fake OpenCode process_session schema in {}: {}",
+                db_path.display(),
+                error
+            )
+        });
+}
+
 pub fn update_saved_session_opencode_session_id(db_path: &Path, name: &str, session_id: &str) {
     let connection = Connection::open(db_path)
         .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));

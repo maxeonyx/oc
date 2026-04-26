@@ -2,9 +2,9 @@ mod common;
 
 use common::{
     capture_tmux_pane, create_tmux_session_in_dir, detach_tmux_client_from_session,
-    insert_opencode_session, read_saved_sessions, send_keys_to_tmux_session,
-    spawn_tmux_attach_client, tmux_pane_pid, tmux_session_attached_count,
-    update_opencode_process_session_start_ticks, wait_for_file_exists,
+    ensure_opencode_process_session_table, insert_opencode_session, read_saved_sessions,
+    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_pane_pid,
+    tmux_session_attached_count, update_opencode_process_session_start_ticks, wait_for_file_exists,
     wait_for_opencode_process_session_state, wait_for_tmux_client_detach_window,
     wait_for_tmux_pane_contains, wait_for_tmux_session_attached, FakeOpenCode, SavedSessionRow,
     TestEnv,
@@ -423,9 +423,68 @@ fn hidden_session_dump_reports_running_attached_session() {
 fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_match() {
     // Old-schema compatibility: only the legacy `session` table exists, so catch-up may still use directory matching.
     let env = TestEnv::new("catchup-single-root-match");
+    let keep_dir = env.root_dir().join("keep");
+    let ambiguous_dir = env.root_dir().join("ambiguous");
+
+    std::fs::create_dir_all(&keep_dir).expect("keep directory should be creatable");
+    std::fs::create_dir_all(&ambiguous_dir).expect("ambiguous directory should be creatable");
 
     create_saved_alias(&env, "dc", Some(env.root_dir()));
+    create_saved_alias(&env, "keep", Some(&keep_dir));
+    create_saved_alias(&env, "amb", Some(&ambiguous_dir));
+    common::update_saved_session_opencode_session_id(env.aliases_file(), "keep", "ses_existing");
+
     insert_opencode_session(env.opencode_db(), "ses_single_match", env.root_dir(), None);
+    insert_opencode_session(env.opencode_db(), "ses_keep_new", &keep_dir, None);
+    insert_opencode_session(env.opencode_db(), "ses_amb_one", &ambiguous_dir, None);
+    insert_opencode_session(env.opencode_db(), "ses_amb_two", &ambiguous_dir, None);
+
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        read_saved_sessions(env.aliases_file()),
+        vec![
+            SavedSessionRow {
+                id: 1,
+                name: String::from("dc"),
+                directory: env.root_dir().to_path_buf(),
+                opencode_session_id: Some(String::from("ses_single_match")),
+                opencode_args: String::from(EMPTY_ARGS_JSON),
+            },
+            SavedSessionRow {
+                id: 2,
+                name: String::from("keep"),
+                directory: keep_dir,
+                opencode_session_id: Some(String::from("ses_existing")),
+                opencode_args: String::from(EMPTY_ARGS_JSON),
+            },
+            SavedSessionRow {
+                id: 3,
+                name: String::from("amb"),
+                directory: ambiguous_dir,
+                opencode_session_id: None,
+                opencode_args: String::from(EMPTY_ARGS_JSON),
+            },
+        ]
+    );
+}
+
+#[test]
+fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_directory_has_one_root_match(
+) {
+    let env = TestEnv::new("catchup-idle-single-root-match");
+
+    create_saved_alias(&env, "dc", Some(env.root_dir()));
+    ensure_opencode_process_session_table(env.opencode_db());
+    insert_opencode_session(
+        env.opencode_db(),
+        "ses_idle_single_match",
+        env.root_dir(),
+        None,
+    );
 
     env.oc_cmd()
         .args(["__dump-session-list"])
@@ -438,7 +497,43 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
             id: 1,
             name: String::from("dc"),
             directory: env.root_dir().to_path_buf(),
-            opencode_session_id: Some(String::from("ses_single_match")),
+            opencode_session_id: Some(String::from("ses_idle_single_match")),
+            opencode_args: String::from(EMPTY_ARGS_JSON),
+        }]
+    );
+}
+
+#[test]
+fn session_list_catchup_matches_tilde_alias_directory_against_expanded_home_path() {
+    let env = TestEnv::new("catchup-tilde-directory-match");
+    let fake_home = env.root_dir().join("home");
+    let project_dir = fake_home.join("project");
+
+    std::fs::create_dir_all(&project_dir)
+        .expect("fake tilde project directory should be creatable");
+
+    env.oc_cmd()
+        .env("HOME", &fake_home)
+        .args(["alias", "dc", "~/project"])
+        .assert()
+        .success();
+
+    ensure_opencode_process_session_table(env.opencode_db());
+    insert_opencode_session(env.opencode_db(), "ses_tilde_match", &project_dir, None);
+
+    env.oc_cmd()
+        .env("HOME", &fake_home)
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        read_saved_sessions(env.aliases_file()),
+        vec![SavedSessionRow {
+            id: 1,
+            name: String::from("dc"),
+            directory: Path::new("~/project").to_path_buf(),
+            opencode_session_id: Some(String::from("ses_tilde_match")),
             opencode_args: String::from(EMPTY_ARGS_JSON),
         }]
     );
