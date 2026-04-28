@@ -117,6 +117,15 @@ fn run_tmux_success(args: &[&str], description: &str) -> Output {
     output
 }
 
+fn format_tmux_output_failure(output: &Output, description: &str) -> String {
+    format!(
+        "Failed to {}\nstdout:\n{}\nstderr:\n{}",
+        description,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
 pub fn create_tmux_session(session_name: &str) {
     let output = run_tmux_output(
         &["new-session", "-d", "-s", session_name],
@@ -309,14 +318,103 @@ pub fn wait_for_file_exists(path: &Path, timeout: Duration) {
     });
 }
 
+pub fn wait_for_file_to_have_non_empty_contents(path: &Path, timeout: Duration) -> String {
+    let description = format!("file {} to have non-empty contents", path.display());
+
+    wait_until(
+        &description,
+        timeout,
+        DEFAULT_POLL_INTERVAL,
+        || match fs::read_to_string(path) {
+            Ok(contents) => {
+                let trimmed = contents.trim();
+                if trimmed.is_empty() {
+                    WaitStatus::pending(format!("contents present but empty: {:?}", contents))
+                } else {
+                    WaitStatus::ready(trimmed.to_string(), contents)
+                }
+            }
+            Err(error) => WaitStatus::pending(format!("read error: {}", error)),
+        },
+    )
+}
+
+pub fn wait_for_file_to_contain_parseable_u32(path: &Path, timeout: Duration) -> u32 {
+    let description = format!("file {} to contain parseable u32", path.display());
+
+    wait_until(
+        &description,
+        timeout,
+        DEFAULT_POLL_INTERVAL,
+        || match fs::read_to_string(path) {
+            Ok(contents) => {
+                let trimmed = contents.trim();
+                match trimmed.parse::<u32>() {
+                    Ok(value) if value > 0 => {
+                        WaitStatus::ready(value, format!("contents: {:?}", contents))
+                    }
+                    Ok(value) => WaitStatus::pending(format!(
+                        "parsed non-positive value {} from {:?}",
+                        value, contents
+                    )),
+                    Err(error) => {
+                        WaitStatus::pending(format!("failed to parse {:?}: {}", contents, error))
+                    }
+                }
+            }
+            Err(error) => WaitStatus::pending(format!("read error: {}", error)),
+        },
+    )
+}
+
 pub fn tmux_pane_current_command(session_name: &str) -> String {
-    let current_command = tmux_display_message(session_name, "#{pane_current_command}");
+    try_tmux_pane_current_command(session_name).unwrap_or_else(|error| panic!("{}", error))
+}
+
+pub fn wait_for_tmux_pane_current_command_to_contain(
+    session_name: &str,
+    needle: &str,
+    timeout: Duration,
+) -> String {
+    let description = format!(
+        "tmux pane {} current command to contain {}",
+        session_name, needle
+    );
+
+    wait_until(
+        &description,
+        timeout,
+        DEFAULT_POLL_INTERVAL,
+        || match try_tmux_pane_current_command(session_name) {
+            Ok(current_command) => {
+                let observed = format!("current command: {}", current_command);
+                if current_command.contains(needle) {
+                    WaitStatus::ready(current_command, observed)
+                } else {
+                    WaitStatus::pending(observed)
+                }
+            }
+            Err(error) => WaitStatus::pending(error),
+        },
+    )
+}
+
+fn try_tmux_pane_current_command(session_name: &str) -> Result<String, String> {
+    let current_command = try_tmux_display_message(
+        session_name,
+        "#{pane_current_command}",
+        "read tmux pane current command",
+    )?;
 
     if current_command == "sh" {
-        return tmux_display_message(session_name, "#{pane_start_command}");
+        return try_tmux_display_message(
+            session_name,
+            "#{pane_start_command}",
+            "read tmux pane start command",
+        );
     }
 
-    current_command
+    Ok(current_command)
 }
 
 pub fn capture_tmux_pane(session_name: &str) -> String {
@@ -348,24 +446,61 @@ pub fn wait_for_tmux_pane_contains(session_name: &str, needle: &str, timeout: Du
 }
 
 fn tmux_display_message(session_name: &str, format_string: &str) -> String {
-    let output = run_tmux_success(
+    try_tmux_display_message(session_name, format_string, "read tmux display message")
+        .unwrap_or_else(|error| panic!("{}", error))
+}
+
+fn try_tmux_display_message(
+    session_name: &str,
+    format_string: &str,
+    description: &str,
+) -> Result<String, String> {
+    let output = run_tmux_output(
         &["display-message", "-p", "-t", session_name, format_string],
-        "read tmux display message",
+        description,
     );
 
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
+    if !output.status.success() {
+        return Err(format_tmux_output_failure(&output, description));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 pub fn tmux_pane_pid(session_name: &str) -> u32 {
-    let output = run_tmux_success(
-        &["display-message", "-p", "-t", session_name, "#{pane_pid}"],
-        "read tmux pane pid",
-    );
+    try_tmux_pane_pid(session_name).unwrap_or_else(|error| panic!("{}", error))
+}
 
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse()
-        .unwrap_or_else(|error| panic!("Failed to parse tmux pane pid: {}", error))
+pub fn wait_for_tmux_pane_pid_to_be_non_zero(session_name: &str, timeout: Duration) -> u32 {
+    let description = format!("tmux pane {} pid to be non-zero", session_name);
+
+    wait_until(
+        &description,
+        timeout,
+        DEFAULT_POLL_INTERVAL,
+        || match try_tmux_pane_pid(session_name) {
+            Ok(pid) => {
+                let observed = format!("pane pid: {}", pid);
+                if pid > 0 {
+                    WaitStatus::ready(pid, observed)
+                } else {
+                    WaitStatus::pending(observed)
+                }
+            }
+            Err(error) => WaitStatus::pending(error),
+        },
+    )
+}
+
+fn try_tmux_pane_pid(session_name: &str) -> Result<u32, String> {
+    let pane_pid = try_tmux_display_message(session_name, "#{pane_pid}", "read tmux pane pid")?;
+
+    pane_pid.parse().map_err(|error| {
+        format!(
+            "Failed to parse tmux pane pid from {:?}: {}",
+            pane_pid, error
+        )
+    })
 }
 
 pub fn detach_tmux_client_from_session(session_name: &str) {
@@ -448,6 +583,84 @@ pub fn wait_for_tmux_session_attached(session_name: &str, timeout: Duration) {
     });
 }
 
+pub fn wait_for_tmux_session_client_ready_for_detach(session_name: &str, timeout: Duration) {
+    let description = format!(
+        "tmux session {} to have a concrete attached client ready for detach",
+        session_name
+    );
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let observation = observe_tmux_clients_for_session(session_name);
+        let observed = format!(
+            "session {} attached count: {}\nclient rows:\n{}",
+            session_name,
+            observation.attached_count,
+            format_tmux_client_rows(&observation.client_rows, &observation.query_error)
+        );
+
+        if observation.query_error.is_none() && !observation.client_rows.is_empty() {
+            WaitStatus::ready((), observed)
+        } else {
+            WaitStatus::pending(observed)
+        }
+    });
+}
+
+struct TmuxClientObservation {
+    attached_count: usize,
+    client_rows: Vec<String>,
+    query_error: Option<String>,
+}
+
+fn observe_tmux_clients_for_session(session_name: &str) -> TmuxClientObservation {
+    let output = run_tmux_output(
+        &[
+            "list-clients",
+            "-t",
+            session_name,
+            "-F",
+            "#{client_name}\tpid=#{client_pid}\ttty=#{client_tty}\tsession=#{client_session}",
+        ],
+        "list tmux clients for session",
+    );
+
+    let query_error = if output.status.success() {
+        None
+    } else {
+        Some(format_tmux_output_failure(
+            &output,
+            "list tmux clients for session",
+        ))
+    };
+
+    let client_rows = if output.status.success() {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(String::from)
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    TmuxClientObservation {
+        attached_count: tmux_session_attached_count(session_name),
+        client_rows,
+        query_error,
+    }
+}
+
+fn format_tmux_client_rows(client_rows: &[String], query_error: &Option<String>) -> String {
+    if let Some(query_error) = query_error {
+        return query_error.clone();
+    }
+
+    if client_rows.is_empty() {
+        return String::from("(none)");
+    }
+
+    client_rows.join("\n")
+}
+
 pub fn spawn_tmux_attach_client(session_name: &str) -> Child {
     let mut command = StdCommand::new("python3");
     command
@@ -467,10 +680,6 @@ pub fn spawn_tmux_attach_client(session_name: &str) -> Child {
             session_name, error
         )
     })
-}
-
-pub fn wait_for_tmux_client_detach_window() {
-    thread::sleep(Duration::from_millis(500));
 }
 
 pub struct TestEnv {
@@ -865,6 +1074,22 @@ impl FakeOpenCode {
         self.log_dir.join("session-id.txt")
     }
 
+    pub fn reset_logs_for_launch(&self) {
+        for path in [
+            self.cwd_log_path(),
+            self.args_log_path(),
+            self.pid_log_path(),
+            self.events_log_path(),
+            self.session_id_log_path(),
+        ] {
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => panic!("Failed to remove {}: {}", path.display(), error),
+            }
+        }
+    }
+
     pub fn apply_to_command(&self, command: &mut StdCommand) {
         command
             .env("PATH", prepend_path(&self.bin_dir))
@@ -912,6 +1137,23 @@ pub fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
         .expect("session rows should be readable")
         .collect::<Result<Vec<_>, _>>()
         .expect("session rows should decode")
+}
+
+pub fn wait_for_saved_session_id(db_path: &Path, name: &str, timeout: Duration) -> String {
+    let description = format!("saved session {} to have an OpenCode session ID", name);
+
+    wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
+        let rows = read_saved_sessions(db_path);
+        if let Some(row) = rows.iter().find(|row| row.name == name) {
+            if let Some(session_id) = row.opencode_session_id.clone() {
+                WaitStatus::ready(session_id, format!("row: {:?}", row))
+            } else {
+                WaitStatus::pending(format!("row: {:?}", row))
+            }
+        } else {
+            WaitStatus::pending(format!("rows present: {:?}", rows))
+        }
+    })
 }
 
 pub fn read_opencode_sessions(db_path: &Path) -> Vec<OpenCodeSessionRow> {

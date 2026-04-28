@@ -2,10 +2,11 @@ mod common;
 
 use common::{
     detach_tmux_client_from_session, read_opencode_process_sessions, read_opencode_sessions,
-    read_saved_sessions, tmux_pane_current_command, tmux_pane_pid, wait_for_file_contains,
-    wait_for_file_exists, wait_for_opencode_process_session,
-    wait_for_opencode_process_session_absent, wait_for_opencode_process_session_state,
-    wait_for_tmux_client_detach_window, FakeOpenCode, SavedSessionRow, TestEnv,
+    read_saved_sessions, wait_for_file_contains, wait_for_file_exists,
+    wait_for_file_to_contain_parseable_u32, wait_for_file_to_have_non_empty_contents,
+    wait_for_opencode_process_session, wait_for_opencode_process_session_absent,
+    wait_for_opencode_process_session_state, wait_for_tmux_pane_current_command_to_contain,
+    wait_for_tmux_pane_pid_to_be_non_zero, FakeOpenCode, SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -50,6 +51,7 @@ fn spawn_new_command(
     fake_opencode: &FakeOpenCode,
     args: &[&str],
 ) -> std::process::Child {
+    fake_opencode.reset_logs_for_launch();
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
     command
@@ -62,7 +64,6 @@ fn spawn_new_command(
 }
 
 fn allow_new_command_to_settle(session_name: &str) {
-    wait_for_tmux_client_detach_window();
     detach_tmux_client_from_session(session_name);
 }
 
@@ -80,6 +81,7 @@ fn spawn_new_command_with_lifecycle_delay(
     delay_ms: u64,
     args: &[&str],
 ) -> std::process::Child {
+    fake_opencode.reset_logs_for_launch();
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
     command
@@ -101,6 +103,10 @@ fn run_new_command_and_wait(
     let child = spawn_new_command(env, fake_opencode, args);
 
     env.wait_for_tmux_session_exists(session_name);
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
     allow_new_command_to_settle(session_name);
 
     let output = child
@@ -141,10 +147,15 @@ fn new_creates_alias_launches_tmux_session_and_attaches() {
         )],
     );
     assert!(
-        tmux_pane_current_command(&session_name).contains("opencode"),
+        wait_for_tmux_pane_current_command_to_contain(
+            &session_name,
+            "opencode",
+            Duration::from_secs(5)
+        )
+        .contains("opencode"),
         "Expected tmux pane command to include opencode"
     );
-    assert!(tmux_pane_pid(&session_name) > 0);
+    assert!(wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5)) > 0);
 }
 
 #[test]
@@ -393,6 +404,7 @@ fn pane_pid_matches_fake_opencode_process_pid() {
     let fake_opencode = env.install_fake_opencode();
     let session_name = managed_tmux_session_name(&env, "dc");
 
+    fake_opencode.reset_logs_for_launch();
     let mut new_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut new_command);
     let child = new_command
@@ -405,10 +417,10 @@ fn pane_pid_matches_fake_opencode_process_pid() {
         .spawn()
         .expect("oc new should spawn");
     env.wait_for_tmux_session_exists(&session_name);
-    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+    wait_for_file_to_contain_parseable_u32(&fake_opencode.pid_log_path(), Duration::from_secs(5));
 
     let fake_pid = pid_logged_by_fake(&fake_opencode);
-    let pane_pid = tmux_pane_pid(&session_name);
+    let pane_pid = wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5));
     let startup_row =
         wait_for_opencode_process_session(env.opencode_db(), fake_pid, Duration::from_secs(5));
 
@@ -436,7 +448,7 @@ fn fake_opencode_new_writes_process_session_lifecycle() {
 
     let child = spawn_new_command_with_lifecycle_delay(&env, &fake_opencode, 1500, &["new", "dc"]);
     env.wait_for_tmux_session_exists(&session_name);
-    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+    wait_for_file_to_contain_parseable_u32(&fake_opencode.pid_log_path(), Duration::from_secs(5));
 
     let fake_pid = pid_logged_by_fake(&fake_opencode);
     let startup_row =
@@ -466,7 +478,10 @@ fn fake_opencode_new_writes_process_session_lifecycle() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
     let captured_id = read_captured_session_id(&fake_opencode);
     assert_eq!(
         created_row.session_id.as_deref(),
@@ -492,10 +507,14 @@ fn fake_opencode_resume_writes_resumed_process_session_then_deletes_on_exit() {
     let session_name = managed_tmux_session_name(&env, "dc");
 
     run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "dc"]);
-    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
     let captured_id = read_captured_session_id(&fake_opencode);
     fs::remove_file(fake_opencode.pid_log_path()).expect("old pid log should be removable");
 
+    fake_opencode.reset_logs_for_launch();
     let mut restart_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut restart_command);
     let child = restart_command
@@ -507,7 +526,7 @@ fn fake_opencode_resume_writes_resumed_process_session_then_deletes_on_exit() {
         .expect("oc restart should spawn");
 
     env.wait_for_tmux_session_exists(&session_name);
-    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+    wait_for_file_to_contain_parseable_u32(&fake_opencode.pid_log_path(), Duration::from_secs(5));
     let fake_pid = pid_logged_by_fake(&fake_opencode);
 
     let resumed_row = wait_for_opencode_process_session_state(
@@ -552,7 +571,10 @@ fn restart_uses_captured_session_id() {
     let session_name = managed_tmux_session_name(&env, "dc");
 
     run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "dc"]);
-    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
 
     let captured_id = read_captured_session_id(&fake_opencode);
 
@@ -575,7 +597,7 @@ fn launch_detach_captures_session_id_by_pid_when_session_table_is_unavailable() 
 
     let child = spawn_new_command_with_lifecycle_delay(&env, &fake_opencode, 1500, &["new", "dc"]);
     env.wait_for_tmux_session_exists(&session_name);
-    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+    wait_for_file_to_contain_parseable_u32(&fake_opencode.pid_log_path(), Duration::from_secs(5));
 
     let fake_pid = pid_logged_by_fake(&fake_opencode);
     let created_row = wait_for_opencode_process_session_state(
@@ -598,7 +620,10 @@ fn launch_detach_captures_session_id_by_pid_when_session_table_is_unavailable() 
         String::from_utf8_lossy(&output.stderr)
     );
 
-    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
     let captured_id = read_captured_session_id(&fake_opencode);
 
     assert_saved_sessions(
@@ -627,6 +652,7 @@ fn launch_detach_falls_back_to_directory_diff_when_process_session_table_is_miss
     let fake_opencode = env.install_fake_opencode();
     let session_name = managed_tmux_session_name(&env, "dc");
 
+    fake_opencode.reset_logs_for_launch();
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
     let child = command
@@ -639,8 +665,11 @@ fn launch_detach_falls_back_to_directory_diff_when_process_session_table_is_miss
         .spawn()
         .expect("oc new should spawn");
     env.wait_for_tmux_session_exists(&session_name);
-    wait_for_file_exists(&fake_opencode.pid_log_path(), Duration::from_secs(5));
-    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    wait_for_file_to_contain_parseable_u32(&fake_opencode.pid_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
 
     allow_new_command_to_settle(&session_name);
     let output = child
@@ -653,7 +682,10 @@ fn launch_detach_falls_back_to_directory_diff_when_process_session_table_is_miss
         String::from_utf8_lossy(&output.stderr)
     );
 
-    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
     let captured_id = read_captured_session_id(&fake_opencode);
 
     assert_saved_sessions(
@@ -683,6 +715,7 @@ fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
     let session_one = managed_tmux_session_name(&env, "one");
     let session_two = managed_tmux_session_name(&env, "two");
 
+    fake_opencode.reset_logs_for_launch();
     let mut first_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut first_command);
     let first_child = first_command
@@ -695,7 +728,7 @@ fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
         .expect("first oc new should spawn");
 
     env.wait_for_tmux_session_exists(&session_one);
-    let first_pid = tmux_pane_pid(&session_one);
+    let first_pid = wait_for_tmux_pane_pid_to_be_non_zero(&session_one, Duration::from_secs(5));
     wait_for_opencode_process_session_state(
         env.opencode_db(),
         first_pid,
@@ -704,6 +737,7 @@ fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
         |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
     );
 
+    fake_opencode.reset_logs_for_launch();
     let mut second_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut second_command);
     let second_child = second_command
@@ -715,7 +749,7 @@ fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
         .expect("second oc new should spawn");
 
     env.wait_for_tmux_session_exists(&session_two);
-    let second_pid = tmux_pane_pid(&session_two);
+    let second_pid = wait_for_tmux_pane_pid_to_be_non_zero(&session_two, Duration::from_secs(5));
     wait_for_opencode_process_session_state(
         env.opencode_db(),
         second_pid,
@@ -792,6 +826,7 @@ fn concurrent_same_directory_sessions_capture_distinct_ids_by_pid() {
     let session_one = managed_tmux_session_name(&env, "one");
     let session_two = managed_tmux_session_name(&env, "two");
 
+    fake_opencode.reset_logs_for_launch();
     let mut first_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut first_command);
     let first_child = first_command
@@ -804,7 +839,7 @@ fn concurrent_same_directory_sessions_capture_distinct_ids_by_pid() {
         .expect("first oc new should spawn");
 
     env.wait_for_tmux_session_exists(&session_one);
-    let first_pid = tmux_pane_pid(&session_one);
+    let first_pid = wait_for_tmux_pane_pid_to_be_non_zero(&session_one, Duration::from_secs(5));
     wait_for_opencode_process_session_state(
         env.opencode_db(),
         first_pid,
@@ -813,6 +848,7 @@ fn concurrent_same_directory_sessions_capture_distinct_ids_by_pid() {
         |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
     );
 
+    fake_opencode.reset_logs_for_launch();
     let mut second_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut second_command);
     let second_child = second_command
@@ -824,7 +860,7 @@ fn concurrent_same_directory_sessions_capture_distinct_ids_by_pid() {
         .expect("second oc new should spawn");
 
     env.wait_for_tmux_session_exists(&session_two);
-    let second_pid = tmux_pane_pid(&session_two);
+    let second_pid = wait_for_tmux_pane_pid_to_be_non_zero(&session_two, Duration::from_secs(5));
     wait_for_opencode_process_session_state(
         env.opencode_db(),
         second_pid,

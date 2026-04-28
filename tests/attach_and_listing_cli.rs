@@ -3,11 +3,12 @@ mod common;
 use common::{
     capture_tmux_pane, create_tmux_session_in_dir, detach_tmux_client_from_session,
     ensure_opencode_process_session_table, insert_opencode_session, read_saved_sessions,
-    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_pane_pid,
-    tmux_session_attached_count, update_opencode_process_session_start_ticks, wait_for_file_exists,
-    wait_for_opencode_process_session_state, wait_for_tmux_client_detach_window,
-    wait_for_tmux_pane_contains, wait_for_tmux_session_attached, FakeOpenCode, SavedSessionRow,
-    TestEnv,
+    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_session_attached_count,
+    update_opencode_process_session_start_ticks, wait_for_file_exists,
+    wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session_state,
+    wait_for_saved_session_id, wait_for_tmux_pane_contains, wait_for_tmux_pane_pid_to_be_non_zero,
+    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach, FakeOpenCode,
+    SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use serde_json::Value;
@@ -37,6 +38,7 @@ fn spawn_interactive_oc(
     fake_opencode: &FakeOpenCode,
     args: &[&str],
 ) -> std::process::Child {
+    fake_opencode.reset_logs_for_launch();
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
     command
@@ -50,7 +52,7 @@ fn spawn_interactive_oc(
 
 fn detach_after_attach(session_name: &str) {
     wait_for_tmux_session_attached(session_name, Duration::from_secs(5));
-    wait_for_tmux_client_detach_window();
+    wait_for_tmux_session_client_ready_for_detach(session_name, Duration::from_secs(5));
     detach_tmux_client_from_session(session_name);
 }
 
@@ -82,7 +84,11 @@ fn assert_interactive_oc_command_launches_and_succeeds_after_detach(
 ) {
     let child = spawn_interactive_oc(env, fake_opencode, args);
     env.wait_for_tmux_session_exists(session_name);
-    wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
     detach_after_attach(session_name);
 
     let output = child
@@ -113,13 +119,6 @@ fn create_saved_alias(env: &TestEnv, name: &str, directory: Option<&Path>) {
     command.assert().success();
 }
 
-fn saved_session_id_for_name(env: &TestEnv, name: &str) -> Option<String> {
-    read_saved_sessions(env.aliases_file())
-        .into_iter()
-        .find(|row| row.name == name)
-        .and_then(|row| row.opencode_session_id)
-}
-
 fn launch_via_new(env: &TestEnv, fake_opencode: &FakeOpenCode, name: &str) {
     let session_name = managed_tmux_session_name(env, name);
     assert_interactive_oc_command_launches_and_succeeds_after_detach(
@@ -136,6 +135,7 @@ fn spawn_interactive_oc_with_env(
     args: &[&str],
     extra_env: &[(&str, &str)],
 ) -> std::process::Child {
+    fake_opencode.reset_logs_for_launch();
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
     for (key, value) in extra_env {
@@ -463,9 +463,9 @@ fn list_human_includes_public_statuses_and_session_id_placeholder() {
     launch_via_new(&env, &fake_opencode, "attached");
 
     let detached_id =
-        saved_session_id_for_name(&env, "detached").expect("detached session should have saved ID");
+        wait_for_saved_session_id(env.aliases_file(), "detached", Duration::from_secs(5));
     let attached_id =
-        saved_session_id_for_name(&env, "attached").expect("attached session should have saved ID");
+        wait_for_saved_session_id(env.aliases_file(), "attached", Duration::from_secs(5));
 
     let mut attached_client = spawn_tmux_attach_client(&attached_session_name);
     wait_for_tmux_session_attached(&attached_session_name, Duration::from_secs(5));
@@ -522,9 +522,9 @@ fn list_json_uses_public_status_values_and_null_session_ids() {
     launch_via_new(&env, &fake_opencode, "attached");
 
     let detached_id =
-        saved_session_id_for_name(&env, "detached").expect("detached session should have saved ID");
+        wait_for_saved_session_id(env.aliases_file(), "detached", Duration::from_secs(5));
     let attached_id =
-        saved_session_id_for_name(&env, "attached").expect("attached session should have saved ID");
+        wait_for_saved_session_id(env.aliases_file(), "attached", Duration::from_secs(5));
 
     let mut attached_client = spawn_tmux_attach_client(&attached_session_name);
     wait_for_tmux_session_attached(&attached_session_name, Duration::from_secs(5));
@@ -711,7 +711,7 @@ fn session_list_pid_catchup_fills_null_id_after_early_detach() {
 
     wait_for_opencode_process_session_state(
         env.opencode_db(),
-        tmux_pane_pid(&session_name),
+        wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5)),
         Duration::from_secs(5),
         "to remain startup-only before detach",
         |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
@@ -736,7 +736,10 @@ fn session_list_pid_catchup_fills_null_id_after_early_detach() {
         None
     );
 
-    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
     let created_id = std::fs::read_to_string(fake_opencode.session_id_log_path())
         .expect("fake opencode session id log should be readable")
         .trim()
@@ -767,7 +770,7 @@ fn session_list_pid_catchup_ignores_stale_process_session_row() {
     );
     env.wait_for_tmux_session_exists(&session_name);
 
-    let pid = tmux_pane_pid(&session_name);
+    let pid = wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5));
     wait_for_opencode_process_session_state(
         env.opencode_db(),
         pid,
@@ -788,7 +791,10 @@ fn session_list_pid_catchup_ignores_stale_process_session_row() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    wait_for_file_exists(&fake_opencode.session_id_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
     update_opencode_process_session_start_ticks(env.opencode_db(), pid, 1);
 
     env.oc_cmd()
