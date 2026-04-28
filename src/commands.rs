@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::cli::RequestedAction;
+use crate::list_output::{render_json, render_table, rows_from_entries};
 use crate::service::SessionService;
 use crate::tmux;
 use crate::tui;
@@ -92,6 +93,7 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
         RequestedAction::Restart { target } => service.restart_session(&target),
         RequestedAction::Move { target, new_dir } => service.move_session(&target, new_dir),
         RequestedAction::Migrate => run_migrate(service),
+        RequestedAction::List { json } => run_list(service, json),
         RequestedAction::AttachTarget { target } => service.activate_target(&target),
         RequestedAction::Default => tui::run_dashboard(service),
         RequestedAction::DumpSessionList => run_dump_session_list(service),
@@ -106,6 +108,18 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
 fn run_dump_session_list(service: &SessionService) -> Result<()> {
     for session in service.list_dashboard_sessions()? {
         println!("{}", session.debug_dump_line());
+    }
+
+    Ok(())
+}
+
+fn run_list(service: &SessionService, json: bool) -> Result<()> {
+    let rows = rows_from_entries(service.list_dashboard_sessions()?);
+
+    if json {
+        print!("{}", render_json(&rows));
+    } else {
+        print!("{}", render_table(&rows));
     }
 
     Ok(())

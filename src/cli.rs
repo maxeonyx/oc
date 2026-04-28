@@ -34,6 +34,9 @@ pub enum RequestedAction {
         target: String,
     },
     Default,
+    List {
+        json: bool,
+    },
     DumpSessionList,
     DumpRuntimeConfig,
     ParseMemoryStatus {
@@ -89,6 +92,7 @@ impl Cli {
                 RequestedAction::Move { target, new_dir }
             }
             (Some(Command::Migrate), None) => RequestedAction::Migrate,
+            (Some(Command::List { json }), None) => RequestedAction::List { json },
             (Some(Command::DumpSessionList), None) => RequestedAction::DumpSessionList,
             (Some(Command::DumpRuntimeConfig), None) => RequestedAction::DumpRuntimeConfig,
             (Some(Command::ParseMemoryStatus { path }), None) => {
@@ -137,6 +141,10 @@ pub enum Command {
         new_dir: PathBuf,
     },
     Migrate,
+    List {
+        #[arg(long)]
+        json: bool,
+    },
     #[command(name = "__dump-session-list", hide = true)]
     DumpSessionList,
     #[command(name = "__dump-runtime-config", hide = true)]

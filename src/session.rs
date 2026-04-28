@@ -71,6 +71,14 @@ impl SessionStatus {
             Self::Saved => "saved",
         }
     }
+
+    pub fn public_label(self) -> &'static str {
+        match self {
+            Self::RunningAttached => "attached",
+            Self::RunningDetached => "detached",
+            Self::Saved => "saved",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
