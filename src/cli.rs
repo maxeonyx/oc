@@ -37,6 +37,7 @@ pub enum RequestedAction {
     List {
         json: bool,
     },
+    DbPath,
     DumpSessionList,
     DumpRuntimeConfig,
     ParseMemoryStatus {
@@ -93,6 +94,7 @@ impl Cli {
             }
             (Some(Command::Migrate), None) => RequestedAction::Migrate,
             (Some(Command::List { json }), None) => RequestedAction::List { json },
+            (Some(Command::DbPath), None) => RequestedAction::DbPath,
             (Some(Command::DumpSessionList), None) => RequestedAction::DumpSessionList,
             (Some(Command::DumpRuntimeConfig), None) => RequestedAction::DumpRuntimeConfig,
             (Some(Command::ParseMemoryStatus { path }), None) => {
@@ -145,6 +147,8 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    #[command(name = "db-path")]
+    DbPath,
     #[command(name = "__dump-session-list", hide = true)]
     DumpSessionList,
     #[command(name = "__dump-runtime-config", hide = true)]

@@ -32,7 +32,7 @@
     "oc::attach_and_listing_cli$session_list_pid_catchup_ignores_stale_process_session_row": "passing",
     "oc::dashboard_tui$dashboard_removes_enter_hint_and_shows_restart_for_running_session_with_saved_id": "passing",
     "oc::dashboard_tui$dashboard_shows_all_seven_sessions_in_fixture_sized_terminal": "passing",
-    "oc::db_path_cli$db_path_prints_resolved_session_db_path": "pending",
+    "oc::db_path_cli$db_path_prints_resolved_session_db_path": "passing",
     "oc::gatekeeper$tdd_ratchet_gatekeeper": "passing",
     "oc::harness_foundation$test_env_cleans_up_stale_tmux_sessions_before_use": "passing",
     "oc::harness_foundation$test_env_drop_cleans_up_tmux_sessions": "passing",

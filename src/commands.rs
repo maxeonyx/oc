@@ -94,6 +94,7 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
         RequestedAction::Move { target, new_dir } => service.move_session(&target, new_dir),
         RequestedAction::Migrate => run_migrate(service),
         RequestedAction::List { json } => run_list(service, json),
+        RequestedAction::DbPath => run_db_path(service),
         RequestedAction::AttachTarget { target } => service.activate_target(&target),
         RequestedAction::Default => tui::run_dashboard(service),
         RequestedAction::DumpSessionList => run_dump_session_list(service),
@@ -137,6 +138,11 @@ fn run_migrate(service: &SessionService) -> Result<()> {
         println!("conflict {conflict}");
     }
 
+    Ok(())
+}
+
+fn run_db_path(service: &SessionService) -> Result<()> {
+    println!("{}", service.config().session_db_path().display());
     Ok(())
 }
 
