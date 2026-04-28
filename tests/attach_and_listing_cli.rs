@@ -10,6 +10,7 @@ use common::{
     TestEnv,
 };
 use predicates::prelude::*;
+use serde_json::Value;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
@@ -110,6 +111,13 @@ fn create_saved_alias(env: &TestEnv, name: &str, directory: Option<&Path>) {
     }
 
     command.assert().success();
+}
+
+fn saved_session_id_for_name(env: &TestEnv, name: &str) -> Option<String> {
+    read_saved_sessions(env.aliases_file())
+        .into_iter()
+        .find(|row| row.name == name)
+        .and_then(|row| row.opencode_session_id)
 }
 
 fn launch_via_new(env: &TestEnv, fake_opencode: &FakeOpenCode, name: &str) {
@@ -417,6 +425,154 @@ fn hidden_session_dump_reports_running_attached_session() {
         "Expected helper attach client to exit cleanly"
     );
     assert!(tmux_session_attached_count(&session_name) == 0);
+}
+
+#[test]
+fn list_human_reports_empty_state() {
+    let env = TestEnv::new("list-human-empty-state");
+
+    env.oc_cmd().args(["list"]).assert().success().stdout(
+        predicate::str::contains("NAME")
+            .and(predicate::str::contains("SESSION ID"))
+            .and(predicate::str::contains("(no sessions)"))
+            .and(predicate::str::contains(
+                "0 sessions: 0 attached, 0 detached, 0 saved",
+            )),
+    );
+}
+
+#[test]
+fn list_json_reports_empty_array() {
+    let env = TestEnv::new("list-json-empty-state");
+
+    env.oc_cmd()
+        .args(["list", "--json"])
+        .assert()
+        .success()
+        .stdout("[]\n");
+}
+
+#[test]
+fn list_human_includes_public_statuses_and_session_id_placeholder() {
+    let env = TestEnv::new("list-human-statuses-and-session-ids");
+    let fake_opencode = env.install_fake_opencode();
+    let attached_session_name = managed_tmux_session_name(&env, "attached");
+
+    create_saved_alias(&env, "saved", None);
+    launch_via_new(&env, &fake_opencode, "detached");
+    launch_via_new(&env, &fake_opencode, "attached");
+
+    let detached_id =
+        saved_session_id_for_name(&env, "detached").expect("detached session should have saved ID");
+    let attached_id =
+        saved_session_id_for_name(&env, "attached").expect("attached session should have saved ID");
+
+    let mut attached_client = spawn_tmux_attach_client(&attached_session_name);
+    wait_for_tmux_session_attached(&attached_session_name, Duration::from_secs(5));
+
+    let output = env
+        .oc_cmd()
+        .args(["list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output).expect("list output should be valid UTF-8");
+
+    assert!(
+        stdout.contains("NAME"),
+        "Expected header in list output\n{stdout}"
+    );
+    assert!(
+        stdout.contains("saved") && stdout.contains("(none)"),
+        "Expected missing session ID placeholder in list output\n{stdout}"
+    );
+    assert!(
+        stdout.contains("detached") && stdout.contains(&detached_id),
+        "Expected detached session details in list output\n{stdout}"
+    );
+    assert!(
+        stdout.contains("attached") && stdout.contains(&attached_id),
+        "Expected attached session details in list output\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("3 sessions: 1 attached, 1 detached, 1 saved")),
+        "Expected summary footer in list output\n{stdout}"
+    );
+
+    detach_tmux_client_from_session(&attached_session_name);
+    let status = attached_client
+        .wait()
+        .expect("attached tmux client should exit after detach");
+    assert!(
+        status.success(),
+        "Expected helper attach client to exit cleanly"
+    );
+}
+
+#[test]
+fn list_json_uses_public_status_values_and_null_session_ids() {
+    let env = TestEnv::new("list-json-statuses-and-session-ids");
+    let fake_opencode = env.install_fake_opencode();
+    let attached_session_name = managed_tmux_session_name(&env, "attached");
+
+    create_saved_alias(&env, "saved", None);
+    launch_via_new(&env, &fake_opencode, "detached");
+    launch_via_new(&env, &fake_opencode, "attached");
+
+    let detached_id =
+        saved_session_id_for_name(&env, "detached").expect("detached session should have saved ID");
+    let attached_id =
+        saved_session_id_for_name(&env, "attached").expect("attached session should have saved ID");
+
+    let mut attached_client = spawn_tmux_attach_client(&attached_session_name);
+    wait_for_tmux_session_attached(&attached_session_name, Duration::from_secs(5));
+
+    let output = env
+        .oc_cmd()
+        .args(["list", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let sessions: Value = serde_json::from_slice(&output).expect("list JSON should parse");
+
+    let sessions = sessions
+        .as_array()
+        .expect("list JSON output should be an array");
+    assert_eq!(sessions.len(), 3, "Expected three sessions in JSON output");
+
+    let saved = sessions
+        .iter()
+        .find(|session| session["name"] == "saved")
+        .expect("saved session should be present");
+    assert_eq!(saved["status"], "saved");
+    assert_eq!(saved["session_id"], Value::Null);
+
+    let detached = sessions
+        .iter()
+        .find(|session| session["name"] == "detached")
+        .expect("detached session should be present");
+    assert_eq!(detached["status"], "detached");
+    assert_eq!(detached["session_id"], detached_id);
+
+    let attached = sessions
+        .iter()
+        .find(|session| session["name"] == "attached")
+        .expect("attached session should be present");
+    assert_eq!(attached["status"], "attached");
+    assert_eq!(attached["session_id"], attached_id);
+
+    detach_tmux_client_from_session(&attached_session_name);
+    let status = attached_client
+        .wait()
+        .expect("attached tmux client should exit after detach");
+    assert!(
+        status.success(),
+        "Expected helper attach client to exit cleanly"
+    );
 }
 
 #[test]
