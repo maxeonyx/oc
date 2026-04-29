@@ -14,6 +14,16 @@ use crate::session_list::merge_saved_and_runtime_sessions_with_prefix;
 use crate::storage::SessionStore;
 use crate::tmux::Tmux;
 
+const SESSION_ID_CAPTURE_POLL_ATTEMPTS: usize = 200;
+const SESSION_ID_CAPTURE_POLL_INTERVAL_MS: u64 = 100;
+
+enum PidCaptureOutcome {
+    Captured,
+    Retry,
+    FallbackAllowed,
+    Stop,
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionService {
     config: RuntimeConfig,
@@ -284,10 +294,10 @@ impl SessionService {
         let launch = SessionLaunch::for_saved_session(tmux, saved_session);
         let directory_compatibility_fallback_snapshot =
             self.prepare_directory_compatibility_fallback_snapshot(saved_session)?;
-        let launched = self.ensure_tmux_session_running(tmux, &launch)?;
+        self.ensure_tmux_session_running(tmux, &launch)?;
         self.attach_to_session(tmux, &launch)?;
 
-        if launched {
+        if saved_session.opencode_session_id.is_none() {
             self.capture_session_id_after_attach(
                 tmux,
                 store,
@@ -350,14 +360,24 @@ impl SessionService {
         directory_compatibility_fallback_snapshot: Option<BTreeSet<String>>,
     ) -> Result<()> {
         let tmux_session_name = tmux.managed_session_name(&saved_session.name);
-        for _ in 0..20 {
+        let mut fallback_allowed = false;
+
+        for _ in 0..SESSION_ID_CAPTURE_POLL_ATTEMPTS {
             if let Some(pid) = tmux.pane_pid(&tmux_session_name)? {
-                if self.capture_session_id_via_pid(store, saved_session, pid)? {
-                    return Ok(());
+                match self.capture_session_id_via_pid(store, saved_session, pid)? {
+                    PidCaptureOutcome::Captured | PidCaptureOutcome::Stop => return Ok(()),
+                    PidCaptureOutcome::Retry => {}
+                    PidCaptureOutcome::FallbackAllowed => fallback_allowed = true,
                 }
             }
 
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(
+                SESSION_ID_CAPTURE_POLL_INTERVAL_MS,
+            ));
+        }
+
+        if !fallback_allowed {
+            return Ok(());
         }
 
         let Some(directory_compatibility_fallback_snapshot) =
@@ -395,26 +415,16 @@ impl SessionService {
                         continue;
                     };
 
-                    match opencode_db.process_session_id_for_pid(pid)? {
-                        ProcessSessionLookup::Available(ProcessSessionRowLookup::SessionId(
-                            captured_id,
-                        )) => {
-                            self.persist_captured_session_id(store, &saved_session, &captured_id)?;
-                        }
-                        ProcessSessionLookup::Available(
-                            ProcessSessionRowLookup::RowMissing
-                            | ProcessSessionRowLookup::SessionIdMissing
-                            | ProcessSessionRowLookup::TableMissing,
-                        ) => {
-                            self.catch_up_session_id_via_directory_compatibility_fallback(
-                                &opencode_db,
-                                store,
-                                &saved_session,
-                            )?;
-                        }
-                        ProcessSessionLookup::Available(ProcessSessionRowLookup::Stale)
-                        | ProcessSessionLookup::Unavailable => {}
+                    match self.capture_session_id_via_pid_polling(store, &saved_session, pid)? {
+                        PidCaptureOutcome::Captured | PidCaptureOutcome::Stop => continue,
+                        PidCaptureOutcome::Retry | PidCaptureOutcome::FallbackAllowed => {}
                     }
+
+                    self.catch_up_session_id_via_directory_compatibility_fallback(
+                        &opencode_db,
+                        store,
+                        &saved_session,
+                    )?;
                 }
 
                 return Ok(());
@@ -443,20 +453,50 @@ impl SessionService {
         store: &mut SessionStore,
         saved_session: &SavedSession,
         pid: u32,
-    ) -> Result<bool> {
+    ) -> Result<PidCaptureOutcome> {
         match self.open_opencode_db().process_session_id_for_pid(pid)? {
             ProcessSessionLookup::Available(ProcessSessionRowLookup::SessionId(session_id)) => {
                 self.persist_captured_session_id(store, saved_session, &session_id)?;
-                Ok(true)
+                Ok(PidCaptureOutcome::Captured)
             }
             // Only a missing table permits the old directory-based compatibility fallback.
-            ProcessSessionLookup::Available(ProcessSessionRowLookup::TableMissing) => Ok(false),
+            ProcessSessionLookup::Available(ProcessSessionRowLookup::TableMissing) => {
+                Ok(PidCaptureOutcome::FallbackAllowed)
+            }
             ProcessSessionLookup::Available(
-                ProcessSessionRowLookup::RowMissing
-                | ProcessSessionRowLookup::SessionIdMissing
-                | ProcessSessionRowLookup::Stale,
-            )
-            | ProcessSessionLookup::Unavailable => Ok(true),
+                ProcessSessionRowLookup::RowMissing | ProcessSessionRowLookup::SessionIdMissing,
+            ) => Ok(PidCaptureOutcome::Retry),
+            ProcessSessionLookup::Available(ProcessSessionRowLookup::Stale)
+            | ProcessSessionLookup::Unavailable => Ok(PidCaptureOutcome::Stop),
+        }
+    }
+
+    fn capture_session_id_via_pid_polling(
+        &self,
+        store: &mut SessionStore,
+        saved_session: &SavedSession,
+        pid: u32,
+    ) -> Result<PidCaptureOutcome> {
+        let mut fallback_allowed = false;
+
+        for _ in 0..SESSION_ID_CAPTURE_POLL_ATTEMPTS {
+            match self.capture_session_id_via_pid(store, saved_session, pid)? {
+                outcome @ (PidCaptureOutcome::Captured | PidCaptureOutcome::Stop) => {
+                    return Ok(outcome)
+                }
+                PidCaptureOutcome::Retry => {}
+                PidCaptureOutcome::FallbackAllowed => fallback_allowed = true,
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(
+                SESSION_ID_CAPTURE_POLL_INTERVAL_MS,
+            ));
+        }
+
+        if fallback_allowed {
+            Ok(PidCaptureOutcome::FallbackAllowed)
+        } else {
+            Ok(PidCaptureOutcome::Retry)
         }
     }
 
