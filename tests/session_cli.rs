@@ -11,7 +11,7 @@ use common::{
 use predicates::prelude::*;
 use std::fs;
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const EMPTY_ARGS_JSON: &str = "[]";
 
@@ -120,6 +120,44 @@ fn run_new_command_and_wait(
     );
 }
 
+fn wait_for_command_to_exit_successfully(
+    child: std::process::Child,
+    description: &str,
+    timeout: Duration,
+) {
+    let start = Instant::now();
+    let mut child = child;
+
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .unwrap_or_else(|error| panic!("Failed to poll {description}: {error}"))
+        {
+            let output = child.wait_with_output().unwrap_or_else(|error| {
+                panic!("Failed to collect output for {description}: {error}")
+            });
+            assert!(
+                status.success(),
+                "Expected {description} to exit successfully\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "Timed out waiting for {description} to exit after {:?}",
+                timeout
+            );
+        }
+
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn launch_saved_session(env: &TestEnv, fake_opencode: &FakeOpenCode, name: &str) -> String {
     let session_name = managed_tmux_session_name(env, name);
     run_new_command_and_wait(env, fake_opencode, &session_name, &["new", name]);
@@ -156,6 +194,19 @@ fn new_creates_alias_launches_tmux_session_and_attaches() {
         "Expected tmux pane command to include opencode"
     );
     assert!(wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5)) > 0);
+}
+
+#[test]
+fn new_without_tty_creates_alias_and_tmux_session_without_attaching() {
+    let env = TestEnv::new("new-without-tty-skips-attach");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "headless");
+
+    let child = spawn_new_command(&env, &fake_opencode, &["new", "headless"]);
+
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
+    wait_for_command_to_exit_successfully(child, "headless oc new process", Duration::from_secs(5));
 }
 
 #[test]
