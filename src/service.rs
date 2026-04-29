@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -446,7 +446,7 @@ impl SessionService {
             if let Some(pid) = tmux.pane_pid(&tmux_session_name)? {
                 match self.capture_session_id_via_pid(store, saved_session, pid)? {
                     PersistedPidCaptureOutcome::Captured | PersistedPidCaptureOutcome::Stop => {
-                        return Ok(())
+                        return Ok(());
                     }
                     PersistedPidCaptureOutcome::Retry => {}
                     PersistedPidCaptureOutcome::FallbackAllowed => fallback_allowed = true,
@@ -563,7 +563,7 @@ impl SessionService {
 
                     match self.capture_session_id_via_pid_polling(store, &saved_session, pid)? {
                         PersistedPidCaptureOutcome::Captured | PersistedPidCaptureOutcome::Stop => {
-                            continue
+                            continue;
                         }
                         PersistedPidCaptureOutcome::Retry
                         | PersistedPidCaptureOutcome::FallbackAllowed => {}

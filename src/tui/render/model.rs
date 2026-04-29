@@ -8,7 +8,7 @@ use crate::session::SessionStatus;
 
 use super::layout;
 use super::theme::Theme;
-use crate::tui::format::{format_column_row, format_memory, ColumnWidths};
+use crate::tui::format::{ColumnWidths, format_column_row, format_memory};
 use crate::tui::state::DashboardState;
 use crate::tui::types::{
     ActionState, CursorPosition, DashboardAction, DashboardGroup, DashboardRow, DashboardSnapshot,

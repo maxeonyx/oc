@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::env;
-use std::io::{stdin, IsTerminal};
+use std::io::{IsTerminal, stdin};
 use std::path::PathBuf;
 
 use crate::cli::RequestedAction;
