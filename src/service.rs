@@ -41,13 +41,32 @@ impl SessionService {
         dir: Option<PathBuf>,
         opencode_args: Vec<String>,
     ) -> Result<()> {
+        self.create_session_with_attach(name, dir, opencode_args, true)
+    }
+
+    pub fn create_session_headless(
+        &self,
+        name: String,
+        dir: Option<PathBuf>,
+        opencode_args: Vec<String>,
+    ) -> Result<()> {
+        self.create_session_with_attach(name, dir, opencode_args, false)
+    }
+
+    fn create_session_with_attach(
+        &self,
+        name: String,
+        dir: Option<PathBuf>,
+        opencode_args: Vec<String>,
+        attach: bool,
+    ) -> Result<()> {
         let directory = resolve_new_directory(dir)?;
         let alias = NewSessionAlias::new(name, directory, opencode_args)?;
         let tmux = self.open_tmux();
         let mut store = self.open_session_store()?;
         let saved_session = store.save_alias(alias).context("failed to save session")?;
 
-        self.activate_new_saved_session(&tmux, &mut store, saved_session)
+        self.activate_new_saved_session(&tmux, &mut store, saved_session, attach)
     }
 
     pub fn save_alias(
@@ -234,6 +253,7 @@ impl SessionService {
         tmux: &Tmux,
         store: &mut SessionStore,
         saved_session: SavedSession,
+        attach: bool,
     ) -> Result<()> {
         let launch = SessionLaunch::for_saved_session(tmux, &saved_session);
         let directory_compatibility_fallback_snapshot =
@@ -243,7 +263,10 @@ impl SessionService {
             rollback_saved_session(store, &saved_session.name, error)?;
         }
 
-        self.attach_to_session(tmux, &launch)?;
+        if attach {
+            self.attach_to_session(tmux, &launch)?;
+        }
+
         self.capture_session_id_after_attach(
             tmux,
             store,
@@ -327,10 +350,14 @@ impl SessionService {
         directory_compatibility_fallback_snapshot: Option<BTreeSet<String>>,
     ) -> Result<()> {
         let tmux_session_name = tmux.managed_session_name(&saved_session.name);
-        if let Some(pid) = tmux.pane_pid(&tmux_session_name)? {
-            if self.capture_session_id_via_pid(store, saved_session, pid)? {
-                return Ok(());
+        for _ in 0..20 {
+            if let Some(pid) = tmux.pane_pid(&tmux_session_name)? {
+                if self.capture_session_id_via_pid(store, saved_session, pid)? {
+                    return Ok(());
+                }
             }
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
         let Some(directory_compatibility_fallback_snapshot) =

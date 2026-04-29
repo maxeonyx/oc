@@ -53,7 +53,7 @@
     "oc::session_cli$new_rejects_duplicate_name_without_creating_second_tmux_session": "passing",
     "oc::session_cli$new_rejects_missing_directory": "passing",
     "oc::session_cli$new_uses_explicit_dir_and_args_when_launching_tmux_session": "passing",
-    "oc::session_cli$new_without_tty_creates_alias_and_tmux_session_without_attaching": "pending",
+    "oc::session_cli$new_without_tty_creates_alias_and_tmux_session_without_attaching": "passing",
     "oc::session_cli$pane_pid_matches_fake_opencode_process_pid": "passing",
     "oc::session_cli$restart_uses_captured_session_id": "passing",
     "oc::session_cli$restart_uses_captured_session_id_when_only_process_session_support_exists": "passing",

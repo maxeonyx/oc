@@ -2,7 +2,7 @@ mod common;
 
 use common::{
     detach_tmux_client_from_session, read_opencode_process_sessions, read_opencode_sessions,
-    read_saved_sessions, wait_for_file_contains, wait_for_file_exists,
+    read_saved_sessions, tmux_session_attached_count, wait_for_file_contains, wait_for_file_exists,
     wait_for_file_to_contain_parseable_u32, wait_for_file_to_have_non_empty_contents,
     wait_for_opencode_process_session, wait_for_opencode_process_session_absent,
     wait_for_opencode_process_session_state, wait_for_tmux_pane_current_command_to_contain,
@@ -55,12 +55,30 @@ fn spawn_new_command(
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
     command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("oc new should spawn")
+}
+
+fn spawn_headless_new_command(
+    env: &TestEnv,
+    fake_opencode: &FakeOpenCode,
+    args: &[&str],
+) -> std::process::Child {
+    fake_opencode.reset_logs_for_launch();
+    let mut command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut command);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("headless oc new should spawn")
 }
 
 fn allow_new_command_to_settle(session_name: &str) {
@@ -85,6 +103,7 @@ fn spawn_new_command_with_lifecycle_delay(
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
     command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", delay_ms.to_string())
         .args(args)
         .stdin(Stdio::null())
@@ -202,11 +221,17 @@ fn new_without_tty_creates_alias_and_tmux_session_without_attaching() {
     let fake_opencode = env.install_fake_opencode();
     let session_name = managed_tmux_session_name(&env, "headless");
 
-    let child = spawn_new_command(&env, &fake_opencode, &["new", "headless"]);
+    let child = spawn_headless_new_command(&env, &fake_opencode, &["new", "headless"]);
 
     env.wait_for_tmux_session_exists(&session_name);
     wait_for_file_exists(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
     wait_for_command_to_exit_successfully(child, "headless oc new process", Duration::from_secs(5));
+    let saved_sessions = read_saved_sessions(env.aliases_file());
+    assert_eq!(saved_sessions.len(), 1);
+    assert_eq!(saved_sessions[0].name, "headless");
+    assert_eq!(saved_sessions[0].directory, env.root_dir());
+    assert_eq!(saved_sessions[0].opencode_args, EMPTY_ARGS_JSON);
+    assert_eq!(tmux_session_attached_count(&session_name), 0);
 }
 
 #[test]
@@ -459,6 +484,7 @@ fn pane_pid_matches_fake_opencode_process_pid() {
     let mut new_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut new_command);
     let child = new_command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .env("OC_FAKE_OPENCODE_DISABLE_SESSION_TABLE", "1")
         .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1500")
         .args(["new", "dc"])
@@ -707,6 +733,7 @@ fn launch_detach_falls_back_to_directory_diff_when_process_session_table_is_miss
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
     let child = command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1500")
         .env("OC_FAKE_OPENCODE_DISABLE_PROCESS_SESSION_TABLE", "1")
         .args(["new", "dc"])
@@ -770,6 +797,7 @@ fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
     let mut first_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut first_command);
     let first_child = first_command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1800")
         .args(["new", "one"])
         .stdin(Stdio::null())
@@ -792,6 +820,7 @@ fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
     let mut second_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut second_command);
     let second_child = second_command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .args(["new", "two"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -881,6 +910,7 @@ fn concurrent_same_directory_sessions_capture_distinct_ids_by_pid() {
     let mut first_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut first_command);
     let first_child = first_command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1800")
         .args(["new", "one"])
         .stdin(Stdio::null())
@@ -903,6 +933,7 @@ fn concurrent_same_directory_sessions_capture_distinct_ids_by_pid() {
     let mut second_command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut second_command);
     let second_child = second_command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .args(["new", "two"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

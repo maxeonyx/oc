@@ -42,6 +42,7 @@ fn spawn_interactive_oc(
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
     command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -142,6 +143,7 @@ fn spawn_interactive_oc_with_env(
         command.env(key, value);
     }
     command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

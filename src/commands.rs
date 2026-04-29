@@ -1,4 +1,6 @@
 use anyhow::Result;
+use std::env;
+use std::io::{stdin, IsTerminal};
 use std::path::PathBuf;
 
 use crate::cli::RequestedAction;
@@ -81,7 +83,13 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
             name,
             dir,
             opencode_args,
-        } => service.create_session(name, dir, opencode_args),
+        } => {
+            if should_attach_new_session() {
+                service.create_session(name, dir, opencode_args)
+            } else {
+                service.create_session_headless(name, dir, opencode_args)
+            }
+        }
         RequestedAction::Alias {
             name,
             dir,
@@ -104,6 +112,10 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
         }
         RequestedAction::ParseMemoryStatus { path } => run_parse_memory_status(path),
     }
+}
+
+fn should_attach_new_session() -> bool {
+    stdin().is_terminal() || env::var_os("OC_FORCE_ATTACH_FOR_TESTS").is_some()
 }
 
 fn run_dump_session_list(service: &SessionService) -> Result<()> {
