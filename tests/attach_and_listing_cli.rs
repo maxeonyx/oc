@@ -185,6 +185,70 @@ fn bare_target_attaches_running_session_by_numeric_id() {
 }
 
 #[test]
+fn bare_target_reattach_captures_session_id_after_first_detach_missed_it() {
+    let env = TestEnv::new("reattach-retries-pid-capture");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    let first_child = spawn_interactive_oc_with_env(
+        &env,
+        &fake_opencode,
+        &["new", "dc"],
+        &[("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "22000")],
+    );
+    env.wait_for_tmux_session_exists(&session_name);
+
+    let pid = wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5));
+    wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        pid,
+        Duration::from_secs(5),
+        "to remain startup-only before first detach",
+        |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
+    );
+
+    detach_after_attach(&session_name);
+
+    let first_output = first_child
+        .wait_with_output()
+        .expect("first interactive oc command should exit after detach");
+    assert!(
+        first_output.status.success(),
+        "Expected first interactive oc command to succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&first_output.stdout),
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        None
+    );
+
+    let second_child = spawn_interactive_oc(&env, &fake_opencode, &["dc"]);
+    detach_after_attach(&session_name);
+
+    let second_output = second_child
+        .wait_with_output()
+        .expect("second interactive oc command should exit after detach");
+    assert!(
+        second_output.status.success(),
+        "Expected second interactive oc command to succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&second_output.stdout),
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
+    let created_id = read_captured_session_id(&fake_opencode);
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        Some(created_id)
+    );
+}
+
+#[test]
 fn bare_target_launches_saved_alias_by_name_when_tmux_session_is_missing() {
     let env = TestEnv::new("bare-target-launches-by-name");
     let fake_opencode = env.install_fake_opencode();
@@ -733,11 +797,6 @@ fn session_list_pid_catchup_fills_null_id_after_early_detach() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    assert_eq!(
-        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
-        None
-    );
-
     wait_for_file_to_have_non_empty_contents(
         &fake_opencode.session_id_log_path(),
         Duration::from_secs(5),
@@ -747,11 +806,71 @@ fn session_list_pid_catchup_fills_null_id_after_early_detach() {
         .trim()
         .to_string();
 
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        Some(created_id.clone())
+    );
+
     env.oc_cmd()
         .args(["__dump-session-list"])
         .assert()
         .success();
 
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        Some(created_id)
+    );
+}
+
+#[test]
+fn session_list_pid_catchup_waits_for_late_process_session_row() {
+    let env = TestEnv::new("catchup-pid-waits-for-late-row");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    let child = spawn_interactive_oc_with_env(
+        &env,
+        &fake_opencode,
+        &["new", "dc"],
+        &[("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "22000")],
+    );
+    env.wait_for_tmux_session_exists(&session_name);
+
+    wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5)),
+        Duration::from_secs(5),
+        "to remain startup-only before detach",
+        |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
+    );
+
+    detach_after_attach(&session_name);
+
+    let output = child
+        .wait_with_output()
+        .expect("interactive oc command should exit after detach");
+    assert!(
+        output.status.success(),
+        "Expected interactive oc command to succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        None
+    );
+
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
+
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
+    let created_id = read_captured_session_id(&fake_opencode);
     assert_eq!(
         read_saved_sessions(env.aliases_file())[0].opencode_session_id,
         Some(created_id)
@@ -804,8 +923,19 @@ fn session_list_pid_catchup_ignores_stale_process_session_row() {
         .assert()
         .success();
 
+    let created_id = read_captured_session_id(&fake_opencode);
     assert_eq!(
         read_saved_sessions(env.aliases_file())[0].opencode_session_id,
-        None
+        Some(created_id.clone())
+    );
+
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        Some(created_id)
     );
 }
