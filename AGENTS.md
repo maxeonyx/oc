@@ -39,9 +39,19 @@ Tests and fixture scripts create real tmux sessions. **Agents must verify no lea
 
 ## CI & release
 
-Single `.github/workflows/ci.yml` with 4 chained jobs: Check → Build → Release + Pages. Auto-releases on every push to main (no manual tagging). Version bumps are only required for artifact-affecting changes; run `scripts/check-version-bump.py` when changing the release policy.
+Single `.github/workflows/ci.yml` with 4 chained jobs: Check → Build → Release + Pages. Auto-releases on every push to main (no manual tagging). **Every push that changes `src/` or `Cargo.toml` must bump the version in `Cargo.toml`** — CI enforces this and blocks the pipeline otherwise.
 
 The repo pins Rust via `rust-toolchain.toml`; CI should use that same toolchain. The check job installs `tmux`, pins `cargo-nextest` to a Rust-1.88-compatible version, pins `tdd-ratchet` to a specific git revision for reproducibility, and runs `cargo ratchet` (never `cargo test` directly).
+
+**After pushing, agents must monitor CI** (`gh run list --limit 1`) and confirm the pipeline passes. If CI fails, fix it before moving on.
+
+**Installing locally:** Do not use `cargo install`. Download the released binary from GitHub:
+
+```bash
+curl -fsSL https://github.com/maxeonyx/oc/releases/latest/download/oc-x86_64-linux -o ~/.cargo/bin/oc && chmod +x ~/.cargo/bin/oc
+```
+
+Only the linux x86_64 target is built.
 
 ## Git identity
 

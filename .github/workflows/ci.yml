@@ -74,34 +74,9 @@ jobs:
           fi
 
   build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+    name: Build
+    runs-on: ubuntu-latest
     needs: [check]
-    strategy:
-      fail-fast: false
-      matrix:
-        # Windows is intentionally omitted: oc manages tmux-backed sessions.
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            binary: oc
-            asset: oc-x86_64-linux
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            binary: oc
-            asset: oc-x86_64-linux-musl
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            binary: oc
-            asset: oc-aarch64-linux
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            binary: oc
-            asset: oc-x86_64-macos
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            binary: oc
-            asset: oc-aarch64-macos
 
     steps:
       - uses: actions/checkout@v6
@@ -121,33 +96,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust-toolchain.outputs.channel }}
-          targets: ${{ matrix.target }}
-
-      - name: Install cross-compilation tools
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
-      - name: Install musl tools
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target x86_64-unknown-linux-gnu
 
       - name: Prepare asset
-        run: cp target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.asset }}
+        run: cp target/x86_64-unknown-linux-gnu/release/oc oc-x86_64-linux
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          name: oc-x86_64-linux
+          path: oc-x86_64-linux
           retention-days: 1
 
   release:
