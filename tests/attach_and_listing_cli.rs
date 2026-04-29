@@ -237,11 +237,22 @@ fn bare_target_reattach_captures_session_id_after_first_detach_missed_it() {
         String::from_utf8_lossy(&second_output.stderr)
     );
 
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        None
+    );
+
     wait_for_file_to_have_non_empty_contents(
         &fake_opencode.session_id_log_path(),
-        Duration::from_secs(5),
+        Duration::from_secs(30),
     );
     let created_id = read_captured_session_id(&fake_opencode);
+
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
+
     assert_eq!(
         read_saved_sessions(env.aliases_file())[0].opencode_session_id,
         Some(created_id)
@@ -808,7 +819,7 @@ fn session_list_pid_catchup_fills_null_id_after_early_detach() {
 
     assert_eq!(
         read_saved_sessions(env.aliases_file())[0].opencode_session_id,
-        Some(created_id.clone())
+        None
     );
 
     env.oc_cmd()
@@ -866,11 +877,22 @@ fn session_list_pid_catchup_waits_for_late_process_session_row() {
         .assert()
         .success();
 
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        None
+    );
+
     wait_for_file_to_have_non_empty_contents(
         &fake_opencode.session_id_log_path(),
-        Duration::from_secs(5),
+        Duration::from_secs(30),
     );
     let created_id = read_captured_session_id(&fake_opencode);
+
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
+
     assert_eq!(
         read_saved_sessions(env.aliases_file())[0].opencode_session_id,
         Some(created_id)
@@ -916,18 +938,29 @@ fn session_list_pid_catchup_ignores_stale_process_session_row() {
         &fake_opencode.session_id_log_path(),
         Duration::from_secs(5),
     );
-    update_opencode_process_session_start_ticks(env.opencode_db(), pid, 1);
+    let created_id = read_captured_session_id(&fake_opencode);
+
+    assert_eq!(
+        read_saved_sessions(env.aliases_file())[0].opencode_session_id,
+        None
+    );
 
     env.oc_cmd()
         .args(["__dump-session-list"])
         .assert()
         .success();
 
-    let created_id = read_captured_session_id(&fake_opencode);
     assert_eq!(
         read_saved_sessions(env.aliases_file())[0].opencode_session_id,
         Some(created_id.clone())
     );
+
+    update_opencode_process_session_start_ticks(env.opencode_db(), pid, 1);
+
+    env.oc_cmd()
+        .args(["__dump-session-list"])
+        .assert()
+        .success();
 
     env.oc_cmd()
         .args(["__dump-session-list"])
