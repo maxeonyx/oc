@@ -124,6 +124,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
+          merge-multiple: true
           path: artifacts
 
       - name: Read version from Cargo.toml
@@ -156,7 +157,7 @@ jobs:
             --title "$tag" \
             --generate-notes \
             --target "$GITHUB_SHA" \
-            artifacts/*/*
+            artifacts/*
 
   pages:
     name: Pages
@@ -175,6 +176,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
+          merge-multiple: true
           path: artifacts
 
       - name: Setup Pages
@@ -187,7 +189,7 @@ jobs:
           rm -rf _site
           mkdir -p _site/releases
           cp -R docs/. _site/
-          cp artifacts/*/* _site/releases/
+          cp artifacts/* _site/releases/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
