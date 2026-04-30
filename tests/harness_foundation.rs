@@ -34,7 +34,7 @@ fn test_env_injects_runtime_overrides_into_oc() {
 fn test_env_cleans_up_stale_tmux_sessions_before_use() {
     let scope_name = "pre-cleanup";
     let scope_prefix = TestEnv::scope_tmux_prefix(scope_name);
-    let stale_session = format!("{}stale", scope_prefix);
+    let stale_session = format!("{scope_prefix}stale");
 
     cleanup_tmux_sessions_with_prefix(&scope_prefix);
 

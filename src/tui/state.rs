@@ -52,18 +52,30 @@ struct PendingRestart {
     receiver: Receiver<Result<()>>,
 }
 
+struct DashboardStateLoad {
+    selected_identity: Option<SelectedSession>,
+    preferred_action: DashboardAction,
+    input_mode: InputMode,
+    input_text: String,
+    status_message: Option<String>,
+    theme: Theme,
+    terminal_area: Rect,
+}
+
 pub fn run(service: &SessionService, status_message: Option<String>) -> Result<()> {
     let mut terminal = TerminalGuard::enter()?;
     let theme = render::detect_theme();
     let mut state = DashboardState::load(
         service,
-        None,
-        DashboardAction::Attach,
-        InputMode::Filter,
-        String::new(),
-        status_message,
-        theme,
-        terminal.size()?,
+        DashboardStateLoad {
+            selected_identity: None,
+            preferred_action: DashboardAction::Attach,
+            input_mode: InputMode::Filter,
+            input_text: String::new(),
+            status_message,
+            theme,
+            terminal_area: terminal.size()?,
+        },
     )?;
     let mut last_refresh = Instant::now();
 
@@ -135,16 +147,16 @@ enum DashboardLoopAction {
 }
 
 impl DashboardState {
-    fn load(
-        service: &SessionService,
-        selected_identity: Option<SelectedSession>,
-        preferred_action: DashboardAction,
-        input_mode: InputMode,
-        input_text: String,
-        status_message: Option<String>,
-        theme: Theme,
-        terminal_area: Rect,
-    ) -> Result<Self> {
+    fn load(service: &SessionService, load: DashboardStateLoad) -> Result<Self> {
+        let DashboardStateLoad {
+            selected_identity,
+            preferred_action,
+            input_mode,
+            input_text,
+            status_message,
+            theme,
+            terminal_area,
+        } = load;
         let current_directory = std::env::current_dir().ok();
         let snapshot = DashboardSnapshot::from_session_entries(service.list_dashboard_sessions()?);
 
@@ -308,13 +320,15 @@ impl DashboardState {
                     commands::run_requested_action(service, command)?;
                     *self = Self::load(
                         service,
-                        selected_identity,
-                        self.selected_action,
-                        InputMode::Filter,
-                        String::new(),
-                        None,
-                        self.theme,
-                        self.terminal_area,
+                        DashboardStateLoad {
+                            selected_identity,
+                            preferred_action: self.selected_action,
+                            input_mode: InputMode::Filter,
+                            input_text: String::new(),
+                            status_message: None,
+                            theme: self.theme,
+                            terminal_area: self.terminal_area,
+                        },
                     )?;
                 }
             },
@@ -570,13 +584,15 @@ fn run_interactive_action(
 
     *state = DashboardState::load(
         service,
-        selected_identity,
-        selected_action,
-        InputMode::Filter,
-        String::new(),
-        status_message,
-        theme,
-        terminal.size()?,
+        DashboardStateLoad {
+            selected_identity,
+            preferred_action: selected_action,
+            input_mode: InputMode::Filter,
+            input_text: String::new(),
+            status_message,
+            theme,
+            terminal_area: terminal.size()?,
+        },
     )?;
 
     Ok(())

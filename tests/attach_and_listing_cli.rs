@@ -574,7 +574,7 @@ fn list_human_includes_public_statuses_and_session_id_placeholder() {
         "Expected attached session details in list output\n{stdout}"
     );
     assert!(
-        stdout.contains(&format!("3 sessions: 1 attached, 1 detached, 1 saved")),
+        stdout.contains(&"3 sessions: 1 attached, 1 detached, 1 saved".to_string()),
         "Expected summary footer in list output\n{stdout}"
     );
 

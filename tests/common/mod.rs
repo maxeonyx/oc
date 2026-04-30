@@ -99,7 +99,7 @@ fn run_tmux_output(args: &[&str], description: &str) -> Output {
     StdCommand::new("tmux")
         .args(args)
         .output()
-        .unwrap_or_else(|error| panic!("Failed to {}: {}", description, error))
+        .unwrap_or_else(|error| panic!("Failed to {description}: {error}"))
 }
 
 fn run_tmux_success(args: &[&str], description: &str) -> Output {
@@ -254,11 +254,11 @@ pub fn cleanup_tmux_sessions_with_prefix(prefix: &str) {
 }
 
 pub fn wait_for_tmux_session_exists(session_name: &str, timeout: Duration) {
-    let description = format!("tmux session {} to exist", session_name);
+    let description = format!("tmux session {session_name} to exist");
 
     wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
         let exists = tmux_session_exists(session_name);
-        let observed = format!("session {} exists: {}", session_name, exists);
+        let observed = format!("session {session_name} exists: {exists}");
 
         if exists {
             WaitStatus::ready((), observed)
@@ -269,11 +269,11 @@ pub fn wait_for_tmux_session_exists(session_name: &str, timeout: Duration) {
 }
 
 pub fn wait_for_tmux_session_absent(session_name: &str, timeout: Duration) {
-    let description = format!("tmux session {} to be absent", session_name);
+    let description = format!("tmux session {session_name} to be absent");
 
     wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
         let exists = tmux_session_exists(session_name);
-        let observed = format!("session {} exists: {}", session_name, exists);
+        let observed = format!("session {session_name} exists: {exists}");
 
         if exists {
             WaitStatus::pending(observed)
@@ -298,7 +298,7 @@ pub fn wait_for_file_contains(path: &Path, needle: &str, timeout: Duration) -> S
                     WaitStatus::pending(contents)
                 }
             }
-            Err(error) => WaitStatus::pending(format!("read error: {}", error)),
+            Err(error) => WaitStatus::pending(format!("read error: {error}")),
         },
     )
 }
@@ -329,12 +329,12 @@ pub fn wait_for_file_to_have_non_empty_contents(path: &Path, timeout: Duration) 
             Ok(contents) => {
                 let trimmed = contents.trim();
                 if trimmed.is_empty() {
-                    WaitStatus::pending(format!("contents present but empty: {:?}", contents))
+                    WaitStatus::pending(format!("contents present but empty: {contents:?}"))
                 } else {
                     WaitStatus::ready(trimmed.to_string(), contents)
                 }
             }
-            Err(error) => WaitStatus::pending(format!("read error: {}", error)),
+            Err(error) => WaitStatus::pending(format!("read error: {error}")),
         },
     )
 }
@@ -351,18 +351,17 @@ pub fn wait_for_file_to_contain_parseable_u32(path: &Path, timeout: Duration) ->
                 let trimmed = contents.trim();
                 match trimmed.parse::<u32>() {
                     Ok(value) if value > 0 => {
-                        WaitStatus::ready(value, format!("contents: {:?}", contents))
+                        WaitStatus::ready(value, format!("contents: {contents:?}"))
                     }
                     Ok(value) => WaitStatus::pending(format!(
-                        "parsed non-positive value {} from {:?}",
-                        value, contents
+                        "parsed non-positive value {value} from {contents:?}"
                     )),
                     Err(error) => {
-                        WaitStatus::pending(format!("failed to parse {:?}: {}", contents, error))
+                        WaitStatus::pending(format!("failed to parse {contents:?}: {error}"))
                     }
                 }
             }
-            Err(error) => WaitStatus::pending(format!("read error: {}", error)),
+            Err(error) => WaitStatus::pending(format!("read error: {error}")),
         },
     )
 }
@@ -376,10 +375,7 @@ pub fn wait_for_tmux_pane_current_command_to_contain(
     needle: &str,
     timeout: Duration,
 ) -> String {
-    let description = format!(
-        "tmux pane {} current command to contain {}",
-        session_name, needle
-    );
+    let description = format!("tmux pane {session_name} current command to contain {needle}");
 
     wait_until(
         &description,
@@ -387,7 +383,7 @@ pub fn wait_for_tmux_pane_current_command_to_contain(
         DEFAULT_POLL_INTERVAL,
         || match try_tmux_pane_current_command(session_name) {
             Ok(current_command) => {
-                let observed = format!("current command: {}", current_command);
+                let observed = format!("current command: {current_command}");
                 if current_command.contains(needle) {
                     WaitStatus::ready(current_command, observed)
                 } else {
@@ -433,7 +429,7 @@ pub fn send_keys_to_tmux_session(session_name: &str, keys: &[&str]) {
 }
 
 pub fn wait_for_tmux_pane_contains(session_name: &str, needle: &str, timeout: Duration) -> String {
-    let description = format!("tmux pane {} to contain {}", session_name, needle);
+    let description = format!("tmux pane {session_name} to contain {needle}");
 
     wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
         let contents = capture_tmux_pane(session_name);
@@ -472,7 +468,7 @@ pub fn tmux_pane_pid(session_name: &str) -> u32 {
 }
 
 pub fn wait_for_tmux_pane_pid_to_be_non_zero(session_name: &str, timeout: Duration) -> u32 {
-    let description = format!("tmux pane {} pid to be non-zero", session_name);
+    let description = format!("tmux pane {session_name} pid to be non-zero");
 
     wait_until(
         &description,
@@ -480,7 +476,7 @@ pub fn wait_for_tmux_pane_pid_to_be_non_zero(session_name: &str, timeout: Durati
         DEFAULT_POLL_INTERVAL,
         || match try_tmux_pane_pid(session_name) {
             Ok(pid) => {
-                let observed = format!("pane pid: {}", pid);
+                let observed = format!("pane pid: {pid}");
                 if pid > 0 {
                     WaitStatus::ready(pid, observed)
                 } else {
@@ -495,12 +491,9 @@ pub fn wait_for_tmux_pane_pid_to_be_non_zero(session_name: &str, timeout: Durati
 fn try_tmux_pane_pid(session_name: &str) -> Result<u32, String> {
     let pane_pid = try_tmux_display_message(session_name, "#{pane_pid}", "read tmux pane pid")?;
 
-    pane_pid.parse().map_err(|error| {
-        format!(
-            "Failed to parse tmux pane pid from {:?}: {}",
-            pane_pid, error
-        )
-    })
+    pane_pid
+        .parse()
+        .map_err(|error| format!("Failed to parse tmux pane pid from {pane_pid:?}: {error}"))
 }
 
 pub fn detach_tmux_client_from_session(session_name: &str) {
@@ -556,7 +549,7 @@ pub fn tmux_session_attached_count(session_name: &str) -> usize {
         })
         .unwrap_or("0")
         .parse()
-        .unwrap_or_else(|error| panic!("Failed to parse tmux attached count: {}", error))
+        .unwrap_or_else(|error| panic!("Failed to parse tmux attached count: {error}"))
 }
 
 fn is_tmux_server_unavailable_error(stderr: &str) -> bool {
@@ -566,14 +559,11 @@ fn is_tmux_server_unavailable_error(stderr: &str) -> bool {
 }
 
 pub fn wait_for_tmux_session_attached(session_name: &str, timeout: Duration) {
-    let description = format!("tmux session {} to be attached", session_name);
+    let description = format!("tmux session {session_name} to be attached");
 
     wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
         let attached_count = tmux_session_attached_count(session_name);
-        let observed = format!(
-            "session {} attached count: {}",
-            session_name, attached_count
-        );
+        let observed = format!("session {session_name} attached count: {attached_count}");
 
         if attached_count > 0 {
             WaitStatus::ready((), observed)
@@ -584,10 +574,8 @@ pub fn wait_for_tmux_session_attached(session_name: &str, timeout: Duration) {
 }
 
 pub fn wait_for_tmux_session_client_ready_for_detach(session_name: &str, timeout: Duration) {
-    let description = format!(
-        "tmux session {} to have a concrete attached client ready for detach",
-        session_name
-    );
+    let description =
+        format!("tmux session {session_name} to have a concrete attached client ready for detach");
 
     wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
         let observation = observe_tmux_clients_for_session(session_name);
@@ -674,12 +662,9 @@ pub fn spawn_tmux_attach_client(session_name: &str) -> Child {
         command.env("TERM", "screen");
     }
 
-    command.spawn().unwrap_or_else(|error| {
-        panic!(
-            "Failed to attach tmux client for {}: {}",
-            session_name, error
-        )
-    })
+    command
+        .spawn()
+        .unwrap_or_else(|error| panic!("Failed to attach tmux client for {session_name}: {error}"))
 }
 
 pub struct TestEnv {
@@ -1140,18 +1125,18 @@ pub fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
 }
 
 pub fn wait_for_saved_session_id(db_path: &Path, name: &str, timeout: Duration) -> String {
-    let description = format!("saved session {} to have an OpenCode session ID", name);
+    let description = format!("saved session {name} to have an OpenCode session ID");
 
     wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
         let rows = read_saved_sessions(db_path);
         if let Some(row) = rows.iter().find(|row| row.name == name) {
             if let Some(session_id) = row.opencode_session_id.clone() {
-                WaitStatus::ready(session_id, format!("row: {:?}", row))
+                WaitStatus::ready(session_id, format!("row: {row:?}"))
             } else {
-                WaitStatus::pending(format!("row: {:?}", row))
+                WaitStatus::pending(format!("row: {row:?}"))
             }
         } else {
-            WaitStatus::pending(format!("rows present: {:?}", rows))
+            WaitStatus::pending(format!("rows present: {rows:?}"))
         }
     })
 }
@@ -1238,12 +1223,12 @@ pub fn wait_for_opencode_process_session(
     pid: u32,
     timeout: Duration,
 ) -> OpenCodeProcessSessionRow {
-    let description = format!("process_session row for pid {}", pid);
+    let description = format!("process_session row for pid {pid}");
 
     wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
         let rows = read_opencode_process_sessions(db_path);
         if let Some(row) = rows.into_iter().find(|row| row.pid == pid) {
-            WaitStatus::ready(row.clone(), format!("found row for pid {}", pid))
+            WaitStatus::ready(row.clone(), format!("found row for pid {pid}"))
         } else {
             WaitStatus::pending(format!(
                 "rows present: {:?}",
@@ -1263,15 +1248,15 @@ pub fn wait_for_opencode_process_session_state<F>(
 where
     F: Fn(&OpenCodeProcessSessionRow) -> bool,
 {
-    let description = format!("process_session row for pid {} {}", pid, description_suffix);
+    let description = format!("process_session row for pid {pid} {description_suffix}");
 
     wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
         let rows = read_opencode_process_sessions(db_path);
         if let Some(row) = rows.into_iter().find(|row| row.pid == pid) {
             if predicate(&row) {
-                WaitStatus::ready(row.clone(), format!("matched row for pid {}", pid))
+                WaitStatus::ready(row.clone(), format!("matched row for pid {pid}"))
             } else {
-                WaitStatus::pending(format!("current row: {:?}", row))
+                WaitStatus::pending(format!("current row: {row:?}"))
             }
         } else {
             WaitStatus::pending(String::from("row missing"))
@@ -1280,14 +1265,14 @@ where
 }
 
 pub fn wait_for_opencode_process_session_absent(db_path: &Path, pid: u32, timeout: Duration) {
-    let description = format!("process_session row for pid {} to disappear", pid);
+    let description = format!("process_session row for pid {pid} to disappear");
 
     wait_until(&description, timeout, DEFAULT_POLL_INTERVAL, || {
         let rows = read_opencode_process_sessions(db_path);
         if rows.iter().any(|row| row.pid == pid) {
-            WaitStatus::pending(format!("rows present: {:?}", rows))
+            WaitStatus::pending(format!("rows present: {rows:?}"))
         } else {
-            WaitStatus::ready((), format!("pid {} absent", pid))
+            WaitStatus::ready((), format!("pid {pid} absent"))
         }
     });
 }
@@ -1386,17 +1371,11 @@ pub fn update_saved_session_opencode_session_id(db_path: &Path, name: &str, sess
             "UPDATE sessions SET opencode_session_id = ?1 WHERE name = ?2",
             params![session_id, name],
         )
-        .unwrap_or_else(|error| {
-            panic!(
-                "Failed to update OpenCode session ID for {}: {}",
-                name, error
-            )
-        });
+        .unwrap_or_else(|error| panic!("Failed to update OpenCode session ID for {name}: {error}"));
 
     assert_eq!(
         updated, 1,
-        "Expected exactly one saved session named {}",
-        name
+        "Expected exactly one saved session named {name}"
     );
 }
 
@@ -1424,8 +1403,7 @@ pub fn update_opencode_process_session_start_ticks(
 
     assert_eq!(
         updated, 1,
-        "Expected exactly one process_session row for pid {}",
-        pid
+        "Expected exactly one process_session row for pid {pid}"
     );
 }
 

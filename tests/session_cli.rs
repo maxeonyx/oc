@@ -168,10 +168,7 @@ fn wait_for_command_to_exit_successfully(
         if start.elapsed() >= timeout {
             let _ = child.kill();
             let _ = child.wait();
-            panic!(
-                "Timed out waiting for {description} to exit after {:?}",
-                timeout
-            );
+            panic!("Timed out waiting for {description} to exit after {timeout:?}");
         }
 
         std::thread::sleep(Duration::from_millis(50));
