@@ -1,14 +1,16 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, capture_tmux_pane, create_tmux_session_in_dir,
+    capture_tmux_pane, create_legacy_sessions_db, create_tmux_session_in_dir,
     detach_tmux_client_from_session, ensure_opencode_process_session_table,
-    insert_opencode_session, read_saved_sessions, send_keys_to_tmux_session,
-    spawn_tmux_attach_client, tmux_session_attached_count,
-    update_opencode_process_session_start_ticks, wait_for_file_exists,
-    wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session_state,
-    wait_for_saved_session_id, wait_for_tmux_pane_contains, wait_for_tmux_pane_pid_to_be_non_zero,
-    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach,
+    insert_opencode_session, read_saved_sessions, saved_sessions_table_columns,
+    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_session_attached_count,
+    update_opencode_process_session_start_ticks, update_saved_session_last_used_at,
+    wait_for_file_exists, wait_for_file_to_have_non_empty_contents,
+    wait_for_opencode_process_session_state, wait_for_saved_session_id,
+    wait_for_tmux_pane_contains, wait_for_tmux_pane_pid_to_be_non_zero,
+    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach, FakeOpenCode,
+    SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use serde_json::Value;
@@ -20,6 +22,22 @@ const EMPTY_ARGS_JSON: &str = "[]";
 
 fn managed_tmux_session_name(env: &TestEnv, name: &str) -> String {
     format!("{}{}", env.tmux_prefix(), name)
+}
+
+fn dump_session_lines(env: &TestEnv) -> Vec<String> {
+    String::from_utf8(
+        env.oc_cmd()
+            .args(["__dump-session-list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .expect("session dump output should be valid UTF-8")
+    .lines()
+    .map(String::from)
+    .collect()
 }
 
 fn assert_saved_sessions(env: &TestEnv, expected_rows: Vec<SavedSessionRow>) {
@@ -282,6 +300,7 @@ fn bare_target_launches_saved_alias_by_name_when_tmux_session_is_missing() {
             directory: env.root_dir().to_path_buf(),
             opencode_session_id: Some(captured_id),
             opencode_args: String::from(EMPTY_ARGS_JSON),
+            last_used_at: 0,
         }],
     );
 }
@@ -653,6 +672,185 @@ fn list_json_uses_public_status_values_and_null_session_ids() {
 }
 
 #[test]
+fn list_orders_sessions_by_status_then_last_used_then_id_desc() {
+    let env = TestEnv::new("list-orders-by-recency");
+    let fake_opencode = env.install_fake_opencode();
+    let attached_session_name = managed_tmux_session_name(&env, "attached-newer");
+
+    create_saved_alias(&env, "saved-stale", None);
+    create_saved_alias(&env, "saved-fresh", None);
+    create_saved_alias(&env, "saved-tie-low", None);
+    create_saved_alias(&env, "saved-tie-high", None);
+    launch_via_new(&env, &fake_opencode, "detached-older");
+    launch_via_new(&env, &fake_opencode, "detached-newer");
+    launch_via_new(&env, &fake_opencode, "attached-newer");
+
+    update_saved_session_last_used_at(env.aliases_file(), "saved-stale", 0);
+    update_saved_session_last_used_at(env.aliases_file(), "saved-fresh", 300);
+    update_saved_session_last_used_at(env.aliases_file(), "saved-tie-low", 200);
+    update_saved_session_last_used_at(env.aliases_file(), "saved-tie-high", 200);
+    update_saved_session_last_used_at(env.aliases_file(), "detached-older", 100);
+    update_saved_session_last_used_at(env.aliases_file(), "detached-newer", 200);
+    update_saved_session_last_used_at(env.aliases_file(), "attached-newer", 100);
+
+    let mut attached_client = spawn_tmux_attach_client(&attached_session_name);
+    wait_for_tmux_session_attached(&attached_session_name, Duration::from_secs(5));
+
+    let session_names = dump_session_lines(&env)
+        .into_iter()
+        .map(|line| {
+            line.split_whitespace()
+                .find_map(|part| part.strip_prefix("name="))
+                .expect("session dump line should include name")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        session_names,
+        vec![
+            "attached-newer",
+            "detached-newer",
+            "detached-older",
+            "saved-fresh",
+            "saved-tie-high",
+            "saved-tie-low",
+            "saved-stale",
+        ]
+    );
+
+    let list_output = String::from_utf8(
+        env.oc_cmd()
+            .args(["list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .expect("list output should be valid UTF-8");
+    let ordered_names = list_output
+        .lines()
+        .skip(1)
+        .take(7)
+        .map(|line| {
+            line.split_whitespace()
+                .next()
+                .expect("list row should start with session name")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(ordered_names, session_names);
+
+    detach_tmux_client_from_session(&attached_session_name);
+    let status = attached_client
+        .wait()
+        .expect("attached tmux client should exit after detach");
+    assert!(
+        status.success(),
+        "Expected helper attach client to exit cleanly"
+    );
+}
+
+#[test]
+fn existing_db_gains_last_used_at_column_defaulting_to_zero() {
+    let env = TestEnv::new("existing-db-gets-last-used-at");
+
+    create_legacy_sessions_db(
+        env.aliases_file(),
+        &[SavedSessionRow {
+            id: 1,
+            name: String::from("legacy"),
+            directory: env.root_dir().to_path_buf(),
+            opencode_session_id: None,
+            opencode_args: String::from(EMPTY_ARGS_JSON),
+            last_used_at: 999,
+        }],
+    );
+
+    env.oc_cmd().args(["list"]).assert().success();
+
+    let rows = read_saved_sessions(env.aliases_file());
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "legacy");
+    assert_eq!(rows[0].last_used_at, 0);
+    assert!(
+        saved_sessions_table_columns(env.aliases_file()).contains(&String::from("last_used_at"))
+    );
+}
+
+#[test]
+fn create_attach_and_restart_refresh_last_used_at() {
+    let env = TestEnv::new("recency-updates-on-create-attach-restart");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    launch_via_new(&env, &fake_opencode, "dc");
+    let created_last_used = read_saved_sessions(env.aliases_file())
+        .into_iter()
+        .find(|row| row.name == "dc")
+        .expect("created session should exist")
+        .last_used_at;
+    assert!(
+        created_last_used > 0,
+        "expected create to stamp last_used_at"
+    );
+
+    update_saved_session_last_used_at(env.aliases_file(), "dc", 1);
+    assert_interactive_oc_command_succeeds_after_detach(
+        &env,
+        &fake_opencode,
+        &["dc"],
+        &session_name,
+    );
+    let attached_last_used = read_saved_sessions(env.aliases_file())
+        .into_iter()
+        .find(|row| row.name == "dc")
+        .expect("attached session should exist")
+        .last_used_at;
+    assert!(
+        attached_last_used > 1,
+        "expected attach to refresh last_used_at"
+    );
+
+    update_saved_session_last_used_at(env.aliases_file(), "dc", 1);
+    fake_opencode.reset_logs_for_launch();
+    let mut restart_command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut restart_command);
+    let child = restart_command
+        .args(["restart", "dc"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("oc restart should spawn");
+
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_file_exists(&fake_opencode.args_log_path(), Duration::from_secs(5));
+    detach_after_attach(&session_name);
+    let output = child
+        .wait_with_output()
+        .expect("restart command should exit after detach");
+    assert!(
+        output.status.success(),
+        "Expected restart to succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let restarted_last_used = read_saved_sessions(env.aliases_file())
+        .into_iter()
+        .find(|row| row.name == "dc")
+        .expect("restarted session should exist")
+        .last_used_at;
+    assert!(
+        restarted_last_used > 1,
+        "expected restart to refresh last_used_at"
+    );
+}
+
+#[test]
 fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_match() {
     // Old-schema compatibility: only the legacy `session` table exists, so catch-up may still use directory matching.
     let env = TestEnv::new("catchup-single-root-match");
@@ -686,6 +884,7 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
                 directory: env.root_dir().to_path_buf(),
                 opencode_session_id: Some(String::from("ses_single_match")),
                 opencode_args: String::from(EMPTY_ARGS_JSON),
+                last_used_at: 0,
             },
             SavedSessionRow {
                 id: 2,
@@ -693,6 +892,7 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
                 directory: keep_dir,
                 opencode_session_id: Some(String::from("ses_existing")),
                 opencode_args: String::from(EMPTY_ARGS_JSON),
+                last_used_at: 0,
             },
             SavedSessionRow {
                 id: 3,
@@ -700,14 +900,15 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
                 directory: ambiguous_dir,
                 opencode_session_id: None,
                 opencode_args: String::from(EMPTY_ARGS_JSON),
+                last_used_at: 0,
             },
         ]
     );
 }
 
 #[test]
-fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_directory_has_one_root_match()
- {
+fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_directory_has_one_root_match(
+) {
     let env = TestEnv::new("catchup-idle-single-root-match");
 
     create_saved_alias(&env, "dc", Some(env.root_dir()));
@@ -732,6 +933,7 @@ fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_d
             directory: env.root_dir().to_path_buf(),
             opencode_session_id: Some(String::from("ses_idle_single_match")),
             opencode_args: String::from(EMPTY_ARGS_JSON),
+            last_used_at: 0,
         }]
     );
 }
@@ -768,6 +970,7 @@ fn session_list_catchup_matches_tilde_alias_directory_against_expanded_home_path
             directory: Path::new("~/project").to_path_buf(),
             opencode_session_id: Some(String::from("ses_tilde_match")),
             opencode_args: String::from(EMPTY_ARGS_JSON),
+            last_used_at: 0,
         }]
     );
 }

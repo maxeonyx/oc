@@ -2,7 +2,7 @@
 
 use assert_cmd::Command;
 use rand::Rng;
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{params, Connection, OpenFlags};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -687,6 +687,7 @@ pub struct SavedSessionRow {
     pub directory: PathBuf,
     pub opencode_session_id: Option<String>,
     pub opencode_args: String,
+    pub last_used_at: i64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1099,14 +1100,30 @@ pub fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
     let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
 
+    let has_last_used_at = connection
+        .prepare("PRAGMA table_info(sessions)")
+        .expect("sessions table schema should be queryable")
+        .query_map(params![], |row| row.get::<_, String>(1))
+        .expect("sessions table columns should be readable")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("sessions table columns should decode")
+        .iter()
+        .any(|column| column == "last_used_at");
+
+    let select_last_used_at = if has_last_used_at {
+        "last_used_at"
+    } else {
+        "0 AS last_used_at"
+    };
+
     let mut statement = connection
-        .prepare(
+        .prepare(&format!(
             "
-            SELECT id, name, directory, opencode_session_id, opencode_args
+            SELECT id, name, directory, opencode_session_id, opencode_args, {select_last_used_at}
             FROM sessions
             ORDER BY id
-            ",
-        )
+            "
+        ))
         .expect("sessions table should be queryable");
 
     statement
@@ -1117,11 +1134,25 @@ pub fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
                 directory: PathBuf::from(row.get::<_, String>(2)?),
                 opencode_session_id: row.get(3)?,
                 opencode_args: row.get(4)?,
+                last_used_at: row.get(5)?,
             })
         })
         .expect("session rows should be readable")
         .collect::<Result<Vec<_>, _>>()
         .expect("session rows should decode")
+}
+
+pub fn saved_sessions_table_columns(db_path: &Path) -> Vec<String> {
+    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    connection
+        .prepare("PRAGMA table_info(sessions)")
+        .expect("sessions table schema should be queryable")
+        .query_map(params![], |row| row.get::<_, String>(1))
+        .expect("sessions table columns should be readable")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("sessions table columns should decode")
 }
 
 pub fn wait_for_saved_session_id(db_path: &Path, name: &str, timeout: Duration) -> String {
@@ -1379,6 +1410,80 @@ pub fn update_saved_session_opencode_session_id(db_path: &Path, name: &str, sess
     );
 }
 
+pub fn update_saved_session_last_used_at(db_path: &Path, name: &str, last_used_at: i64) {
+    let connection = Connection::open(db_path)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    let updated = connection
+        .execute(
+            "UPDATE sessions SET last_used_at = ?1 WHERE name = ?2",
+            params![last_used_at, name],
+        )
+        .unwrap_or_else(|error| panic!("Failed to update last_used_at for {name}: {error}"));
+
+    assert_eq!(
+        updated, 1,
+        "Expected exactly one saved session named {name}"
+    );
+}
+
+pub fn create_legacy_sessions_db(db_path: &Path, rows: &[SavedSessionRow]) {
+    let parent = db_path
+        .parent()
+        .unwrap_or_else(|| panic!("Session db path should have parent: {}", db_path.display()));
+    fs::create_dir_all(parent)
+        .unwrap_or_else(|error| panic!("Failed to create {}: {}", parent.display(), error));
+
+    let connection = Connection::open(db_path)
+        .unwrap_or_else(|error| panic!("Failed to open {}: {}", db_path.display(), error));
+
+    connection
+        .execute_batch(
+            "
+            DROP TABLE IF EXISTS sessions;
+            CREATE TABLE sessions (
+                id INTEGER PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL UNIQUE,
+                directory TEXT NOT NULL,
+                opencode_session_id TEXT,
+                opencode_args TEXT NOT NULL
+            ) STRICT;
+            ",
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "Failed to initialize legacy saved-session schema in {}: {}",
+                db_path.display(),
+                error
+            )
+        });
+
+    for row in rows {
+        connection
+            .execute(
+                "
+                INSERT INTO sessions (id, name, directory, opencode_session_id, opencode_args)
+                VALUES (?1, ?2, ?3, ?4, ?5)
+                ",
+                params![
+                    row.id,
+                    row.name,
+                    row.directory.display().to_string(),
+                    row.opencode_session_id,
+                    row.opencode_args,
+                ],
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "Failed to insert legacy saved session {} into {}: {}",
+                    row.name,
+                    db_path.display(),
+                    error
+                )
+            });
+    }
+}
+
 pub fn update_opencode_process_session_start_ticks(
     db_path: &Path,
     pid: u32,
@@ -1419,6 +1524,7 @@ pub fn saved_session_row(
         directory: directory.to_path_buf(),
         opencode_session_id: None,
         opencode_args: String::from(opencode_args),
+        last_used_at: 0,
     }
 }
 

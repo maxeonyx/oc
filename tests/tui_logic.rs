@@ -1,6 +1,6 @@
 use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
-use oc::tui::command::{CommandParseError, parse_command};
+use oc::tui::command::{parse_command, CommandParseError};
 use oc::tui::filter::{build_view, summary_for_view, totals_for_rows, totals_scope_label};
 use oc::tui::format::abbreviate_directory;
 use oc::tui::render::body_scroll_for_selection;
@@ -92,8 +92,8 @@ fn empty_filter_shows_sessions_when_no_directory_match() {
 #[test]
 fn empty_filter_places_directory_matches_first() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![
-        session_entry(1, "alpha", "/work/alpha", None, SessionStatus::Saved),
-        session_entry(2, "beta", "/tmp/beta", None, SessionStatus::RunningAttached),
+        session_entry(2, "alpha", "/work/alpha", None, SessionStatus::Saved),
+        session_entry(1, "beta", "/tmp/beta", None, SessionStatus::RunningAttached),
         session_entry(
             3,
             "alpha-two",
@@ -114,9 +114,9 @@ fn empty_filter_places_directory_matches_first() {
         &view,
         &[
             "header",
-            "session:2",
-            "session:3",
             "session:1",
+            "session:3",
+            "session:2",
             "totals:3:2",
         ],
     );
@@ -473,6 +473,56 @@ fn body_scroll_uses_margin_band_and_resets_cleanly_for_small_viewports() {
     assert_eq!(body_scroll_for_selection(body_rows, 3, 0, 3), 2);
     assert_eq!(body_scroll_for_selection(body_rows, 1, 1, 3), 0);
     assert_eq!(body_scroll_for_selection(body_rows, 0, 1, 3), 0);
+}
+
+#[test]
+fn dashboard_snapshot_preserves_shared_session_entry_order_within_status_groups() {
+    let snapshot = DashboardSnapshot::from_session_entries(vec![
+        session_entry(
+            7,
+            "attached-first",
+            "/tmp/attached-first",
+            None,
+            SessionStatus::RunningAttached,
+        ),
+        session_entry(
+            9,
+            "detached-newer",
+            "/tmp/detached-newer",
+            None,
+            SessionStatus::RunningDetached,
+        ),
+        session_entry(
+            3,
+            "detached-older",
+            "/tmp/detached-older",
+            None,
+            SessionStatus::RunningDetached,
+        ),
+        session_entry(
+            11,
+            "saved-first",
+            "/tmp/saved-first",
+            None,
+            SessionStatus::Saved,
+        ),
+        session_entry(
+            2,
+            "saved-second",
+            "/tmp/saved-second",
+            None,
+            SessionStatus::Saved,
+        ),
+    ]);
+
+    assert_eq!(
+        snapshot
+            .rows
+            .iter()
+            .map(|row| row.session_id)
+            .collect::<Vec<_>>(),
+        vec![7, 9, 3, 11, 2]
+    );
 }
 
 fn session_entry(
