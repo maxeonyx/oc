@@ -1,16 +1,15 @@
 mod common;
 
 use common::{
-    capture_tmux_pane, create_legacy_sessions_db, create_tmux_session_in_dir,
-    detach_tmux_client_from_session, ensure_opencode_process_session_table,
-    insert_opencode_session, read_saved_sessions, saved_sessions_table_columns,
-    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_session_attached_count,
-    update_opencode_process_session_start_ticks, update_saved_session_last_used_at,
-    wait_for_file_exists, wait_for_file_to_have_non_empty_contents,
-    wait_for_opencode_process_session_state, wait_for_saved_session_id,
-    wait_for_tmux_pane_contains, wait_for_tmux_pane_pid_to_be_non_zero,
-    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach, FakeOpenCode,
-    SavedSessionRow, TestEnv,
+    FakeOpenCode, SavedSessionRow, TestEnv, capture_tmux_pane, create_legacy_sessions_db,
+    create_tmux_session_in_dir, detach_tmux_client_from_session,
+    ensure_opencode_process_session_table, insert_opencode_session, read_saved_sessions,
+    saved_sessions_table_columns, send_keys_to_tmux_session, spawn_tmux_attach_client,
+    tmux_session_attached_count, update_opencode_process_session_start_ticks,
+    update_saved_session_last_used_at, wait_for_file_exists,
+    wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session_state,
+    wait_for_saved_session_id, wait_for_tmux_pane_contains, wait_for_tmux_pane_pid_to_be_non_zero,
+    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach,
 };
 use predicates::prelude::*;
 use serde_json::Value;
@@ -41,7 +40,14 @@ fn dump_session_lines(env: &TestEnv) -> Vec<String> {
 }
 
 fn assert_saved_sessions(env: &TestEnv, expected_rows: Vec<SavedSessionRow>) {
-    assert_eq!(read_saved_sessions(env.aliases_file()), expected_rows);
+    let actual_rows = read_saved_sessions(env.aliases_file())
+        .into_iter()
+        .map(|mut row| {
+            row.last_used_at = 0;
+            row
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual_rows, expected_rows);
 }
 
 fn read_captured_session_id(fake_opencode: &FakeOpenCode) -> String {
@@ -815,28 +821,20 @@ fn create_attach_and_restart_refresh_last_used_at() {
     );
 
     update_saved_session_last_used_at(env.aliases_file(), "dc", 1);
-    fake_opencode.reset_logs_for_launch();
-    let mut restart_command = env.std_oc_cmd();
-    fake_opencode.apply_to_command(&mut restart_command);
-    let child = restart_command
-        .args(["restart", "dc"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("oc restart should spawn");
+    let session_id = read_saved_sessions(env.aliases_file())
+        .into_iter()
+        .find(|row| row.name == "dc")
+        .and_then(|row| row.opencode_session_id)
+        .expect("session should have a saved OpenCode session ID");
 
-    env.wait_for_tmux_session_exists(&session_name);
+    let mut restart_command = env.oc_cmd();
+    fake_opencode.apply_to_assert_cmd(&mut restart_command);
+    restart_command.args(["restart", "dc"]).assert().success();
     wait_for_file_exists(&fake_opencode.args_log_path(), Duration::from_secs(5));
-    detach_after_attach(&session_name);
-    let output = child
-        .wait_with_output()
-        .expect("restart command should exit after detach");
-    assert!(
-        output.status.success(),
-        "Expected restart to succeed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+    assert_eq!(
+        std::fs::read_to_string(fake_opencode.args_log_path())
+            .expect("args log should be readable"),
+        format!("--session\n{session_id}\n")
     );
 
     let restarted_last_used = read_saved_sessions(env.aliases_file())
@@ -907,8 +905,8 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
 }
 
 #[test]
-fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_directory_has_one_root_match(
-) {
+fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_directory_has_one_root_match()
+ {
     let env = TestEnv::new("catchup-idle-single-root-match");
 
     create_saved_alias(&env, "dc", Some(env.root_dir()));

@@ -81,7 +81,7 @@ impl DashboardSnapshot {
             filtered_memory_bytes: 0,
         };
 
-        let mut rows = entries
+        let rows = entries
             .into_iter()
             .map(|entry| {
                 match entry.status {
@@ -93,8 +93,6 @@ impl DashboardSnapshot {
                 DashboardRow::from_session_entry(entry)
             })
             .collect::<Vec<_>>();
-
-        rows.sort_by_key(|row| (status_rank(row.status), row.session_id));
 
         Self { rows, summary }
     }
@@ -171,13 +169,5 @@ impl DashboardAction {
 impl DashboardView {
     pub fn sessions(&self) -> impl Iterator<Item = &DashboardRow> {
         self.groups.iter().flat_map(|group| group.sessions.iter())
-    }
-}
-
-fn status_rank(status: SessionStatus) -> u8 {
-    match status {
-        SessionStatus::RunningAttached => 0,
-        SessionStatus::RunningDetached => 1,
-        SessionStatus::Saved => 2,
     }
 }

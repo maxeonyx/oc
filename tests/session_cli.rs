@@ -1,12 +1,13 @@
 mod common;
 
 use common::{
-    detach_tmux_client_from_session, read_opencode_process_sessions, read_opencode_sessions,
-    read_saved_sessions, tmux_session_attached_count, wait_for_file_contains, wait_for_file_exists,
-    wait_for_file_to_contain_parseable_u32, wait_for_file_to_have_non_empty_contents,
-    wait_for_opencode_process_session, wait_for_opencode_process_session_absent,
-    wait_for_opencode_process_session_state, wait_for_tmux_pane_current_command_to_contain,
-    wait_for_tmux_pane_pid_to_be_non_zero, FakeOpenCode, SavedSessionRow, TestEnv,
+    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session,
+    read_opencode_process_sessions, read_opencode_sessions, read_saved_sessions,
+    tmux_session_attached_count, update_saved_session_last_used_at, wait_for_file_contains,
+    wait_for_file_exists, wait_for_file_to_contain_parseable_u32,
+    wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session,
+    wait_for_opencode_process_session_absent, wait_for_opencode_process_session_state,
+    wait_for_tmux_pane_current_command_to_contain, wait_for_tmux_pane_pid_to_be_non_zero,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -20,7 +21,14 @@ fn managed_tmux_session_name(env: &TestEnv, name: &str) -> String {
 }
 
 fn assert_saved_sessions(env: &TestEnv, expected_rows: Vec<SavedSessionRow>) {
-    assert_eq!(read_saved_sessions(env.aliases_file()), expected_rows);
+    let actual_rows = read_saved_sessions(env.aliases_file())
+        .into_iter()
+        .map(|mut row| {
+            row.last_used_at = 0;
+            row
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual_rows, expected_rows);
 }
 
 fn read_captured_session_id(fake_opencode: &FakeOpenCode) -> String {
@@ -385,6 +393,8 @@ fn stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias() {
     let session_name = launch_saved_session(&env, &fake_opencode, "dc");
     let captured_id = read_captured_session_id(&fake_opencode);
 
+    update_saved_session_last_used_at(env.aliases_file(), "dc", 1);
+
     env.oc_cmd().args(["stop", "dc"]).assert().success();
     env.wait_for_tmux_session_absent(&session_name);
     let events = wait_for_file_contains(
@@ -411,6 +421,15 @@ fn stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias() {
             EMPTY_ARGS_JSON,
         )],
     );
+    let stopped_last_used = read_saved_sessions(env.aliases_file())
+        .into_iter()
+        .find(|row| row.name == "dc")
+        .expect("stopped session should still exist")
+        .last_used_at;
+    assert!(
+        stopped_last_used > 1,
+        "expected stop to refresh last_used_at"
+    );
 }
 
 #[test]
@@ -419,6 +438,8 @@ fn stop_accepts_numeric_id() {
     let fake_opencode = env.install_fake_opencode();
     let session_name = launch_saved_session(&env, &fake_opencode, "dc");
     let captured_id = read_captured_session_id(&fake_opencode);
+
+    update_saved_session_last_used_at(env.aliases_file(), "dc", 1);
 
     env.oc_cmd().args(["stop", "1"]).assert().success();
     env.wait_for_tmux_session_absent(&session_name);
@@ -431,6 +452,15 @@ fn stop_accepts_numeric_id() {
             &captured_id,
             EMPTY_ARGS_JSON,
         )],
+    );
+    let stopped_last_used = read_saved_sessions(env.aliases_file())
+        .into_iter()
+        .find(|row| row.name == "dc")
+        .expect("stopped session should still exist")
+        .last_used_at;
+    assert!(
+        stopped_last_used > 1,
+        "expected stop by id to refresh last_used_at"
     );
 }
 

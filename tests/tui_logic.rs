@@ -1,6 +1,6 @@
 use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
-use oc::tui::command::{parse_command, CommandParseError};
+use oc::tui::command::{CommandParseError, parse_command};
 use oc::tui::filter::{build_view, summary_for_view, totals_for_rows, totals_scope_label};
 use oc::tui::format::abbreviate_directory;
 use oc::tui::render::body_scroll_for_selection;
@@ -92,8 +92,8 @@ fn empty_filter_shows_sessions_when_no_directory_match() {
 #[test]
 fn empty_filter_places_directory_matches_first() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![
-        session_entry(2, "alpha", "/work/alpha", None, SessionStatus::Saved),
-        session_entry(1, "beta", "/tmp/beta", None, SessionStatus::RunningAttached),
+        session_entry(1, "alpha", "/work/alpha", None, SessionStatus::Saved),
+        session_entry(2, "beta", "/tmp/beta", None, SessionStatus::RunningAttached),
         session_entry(
             3,
             "alpha-two",
@@ -115,8 +115,8 @@ fn empty_filter_places_directory_matches_first() {
         &[
             "header",
             "session:1",
-            "session:3",
             "session:2",
+            "session:3",
             "totals:3:2",
         ],
     );
@@ -294,15 +294,15 @@ fn preferred_action_falls_back_when_row_cannot_support_requested_action() {
 #[test]
 fn filter_enters_top_result_after_refreshing_from_previous_selection() {
     let snapshot = DashboardSnapshot::from_session_entries(vec![
-        session_entry(1, "alpha", "/tmp/alpha", None, SessionStatus::Saved),
-        session_entry(12, "beta", "/tmp/beta", None, SessionStatus::Saved),
+        session_entry(12, "alpha", "/tmp/alpha", None, SessionStatus::Saved),
+        session_entry(1, "beta", "/tmp/beta", None, SessionStatus::Saved),
         session_entry(2, "1-match", "/tmp/1-match", None, SessionStatus::Saved),
     ]);
 
     let unfiltered_view = build_view(&snapshot, "", InputMode::Filter, None);
     let previous_selection = Some(oc::tui::selection::SelectedSession(2));
 
-    assert_eq!(select_index(&unfiltered_view, previous_selection, None), 1);
+    assert_eq!(select_index(&unfiltered_view, previous_selection, None), 2);
 
     let filtered_view = build_view(&snapshot, "1", InputMode::Filter, None);
 
@@ -404,6 +404,7 @@ fn directory_abbreviation_handles_root_parent_without_double_slash() {
         directory: PathBuf::from("/tmp"),
         opencode_session_id: None,
         opencode_args: Vec::new(),
+        last_used_at: 0,
     };
 
     assert_eq!(abbreviate_directory(&saved_session), "/…");
@@ -539,6 +540,7 @@ fn session_entry(
             directory: PathBuf::from(directory),
             opencode_session_id: opencode_session_id.map(String::from),
             opencode_args: Vec::new(),
+            last_used_at: 0,
         },
         status,
         runtime: None,

@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, params};
 use std::fs;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::session::{NewSessionAlias, SavedSession, SessionRef};
 
@@ -47,6 +48,7 @@ impl SessionStore {
             directory: alias.directory,
             opencode_session_id: alias.opencode_session_id,
             opencode_args: alias.opencode_args,
+            last_used_at: 0,
         })
     }
 
@@ -109,7 +111,7 @@ impl SessionStore {
     pub fn list_saved_sessions(&self) -> Result<Vec<SavedSession>> {
         let mut statement = self.prepare_saved_session_query(
             "
-            SELECT id, name, directory, opencode_session_id, opencode_args
+            SELECT id, name, directory, opencode_session_id, opencode_args, last_used_at
             FROM sessions
             ORDER BY id
             ",
@@ -147,10 +149,29 @@ impl SessionStore {
         Ok(())
     }
 
+    pub fn mark_session_used_now(&mut self, name: &str) -> Result<i64> {
+        let now = current_time_millis()?;
+        let updated_rows = self
+            .connection
+            .execute(
+                "UPDATE sessions SET last_used_at = ?1 WHERE name = ?2",
+                params![now, name],
+            )
+            .with_context(|| {
+                format!("failed to update last-used time for session alias '{name}' in storage")
+            })?;
+
+        if updated_rows == 0 {
+            bail!("Session alias '{name}' not found");
+        }
+
+        Ok(now)
+    }
+
     fn find_by_id(&self, id: i64) -> Result<SavedSession> {
         self.find_saved_session(
             "
-            SELECT id, name, directory, opencode_session_id, opencode_args
+            SELECT id, name, directory, opencode_session_id, opencode_args, last_used_at
             FROM sessions
             WHERE id = ?1
             ",
@@ -163,7 +184,7 @@ impl SessionStore {
     fn find_by_name(&self, name: &str) -> Result<SavedSession> {
         self.find_saved_session(
             "
-            SELECT id, name, directory, opencode_session_id, opencode_args
+            SELECT id, name, directory, opencode_session_id, opencode_args, last_used_at
             FROM sessions
             WHERE name = ?1
             ",
@@ -256,15 +277,16 @@ fn insert_alias_row(transaction: &Transaction<'_>, id: i64, alias: &NewSessionAl
 
     match transaction.execute(
         "
-        INSERT INTO sessions (id, name, directory, opencode_session_id, opencode_args)
-        VALUES (?1, ?2, ?3, ?4, ?5)
+        INSERT INTO sessions (id, name, directory, opencode_session_id, opencode_args, last_used_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
         ",
         params![
             id,
             alias.name,
             directory,
             alias.opencode_session_id,
-            serialized_opencode_args
+            serialized_opencode_args,
+            0
         ],
     ) {
         Ok(_) => Ok(()),
@@ -326,5 +348,13 @@ fn map_saved_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SavedSessi
         directory: Path::new(&row.get::<_, String>(2)?).to_path_buf(),
         opencode_session_id: row.get(3)?,
         opencode_args,
+        last_used_at: row.get(5)?,
     })
+}
+
+fn current_time_millis() -> Result<i64> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before the Unix epoch")?;
+    i64::try_from(duration.as_millis()).context("current time millis overflowed i64")
 }

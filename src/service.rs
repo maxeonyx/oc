@@ -175,7 +175,10 @@ impl SessionService {
         let launch = SessionLaunch::for_saved_session(&tmux, &saved_session);
 
         tmux.graceful_stop(&launch.tmux_session_name)
-            .with_context(|| format!("failed to stop running session '{}'", saved_session.name))
+            .with_context(|| format!("failed to stop running session '{}'", saved_session.name))?;
+
+        let mut store = self.open_session_store()?;
+        self.mark_saved_session_used(&mut store, &saved_session)
     }
 
     pub fn remove_session(&self, target: &str) -> Result<()> {
@@ -217,7 +220,10 @@ impl SessionService {
             &launch.directory,
             &launch.opencode_args,
         )
-        .with_context(|| format!("failed to restart session '{}'", saved_session.name))
+        .with_context(|| format!("failed to restart session '{}'", saved_session.name))?;
+
+        let mut store = self.open_session_store()?;
+        self.mark_saved_session_used(&mut store, &saved_session)
     }
 
     pub fn move_session(&self, target: &str, new_dir: PathBuf) -> Result<()> {
@@ -307,13 +313,19 @@ impl SessionService {
         }
 
         if attach {
-            return self.attach_to_session_and_capture_session_id(
+            let result = self.attach_to_session_and_capture_session_id(
                 tmux,
                 &launch,
                 store,
                 &saved_session,
                 directory_compatibility_fallback_snapshot,
             );
+
+            if result.is_ok() {
+                self.mark_saved_session_used(store, &saved_session)?;
+            }
+
+            return result;
         }
 
         self.capture_session_id_after_launch(
@@ -321,7 +333,9 @@ impl SessionService {
             store,
             &saved_session,
             directory_compatibility_fallback_snapshot,
-        )
+        )?;
+
+        self.mark_saved_session_used(store, &saved_session)
     }
 
     fn activate_saved_session(
@@ -347,7 +361,7 @@ impl SessionService {
             self.attach_to_session(tmux, &launch)?;
         }
 
-        Ok(())
+        self.mark_saved_session_used(store, saved_session)
     }
 
     fn ensure_tmux_session_running(&self, tmux: &Tmux, launch: &SessionLaunch) -> Result<bool> {
@@ -722,6 +736,23 @@ impl SessionService {
                     saved_session.name
                 )
             })
+    }
+
+    fn mark_saved_session_used(
+        &self,
+        store: &mut SessionStore,
+        saved_session: &SavedSession,
+    ) -> Result<()> {
+        store
+            .mark_session_used_now(&saved_session.name)
+            .with_context(|| {
+                format!(
+                    "failed to update recency for session '{}'",
+                    saved_session.name
+                )
+            })?;
+
+        Ok(())
     }
 }
 

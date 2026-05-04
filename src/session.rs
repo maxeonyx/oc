@@ -8,6 +8,7 @@ pub struct SavedSession {
     pub directory: PathBuf,
     pub opencode_session_id: Option<String>,
     pub opencode_args: Vec<String>,
+    pub last_used_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
