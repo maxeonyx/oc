@@ -1,13 +1,13 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session,
-    read_opencode_process_sessions, read_opencode_sessions, read_saved_sessions,
-    tmux_session_attached_count, update_saved_session_last_used_at, wait_for_file_contains,
-    wait_for_file_exists, wait_for_file_to_contain_parseable_u32,
+    detach_tmux_client_from_session, read_opencode_process_sessions, read_opencode_sessions,
+    read_saved_sessions, tmux_session_attached_count, update_saved_session_last_used_at,
+    wait_for_file_contains, wait_for_file_exists, wait_for_file_to_contain_parseable_u32,
     wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session,
     wait_for_opencode_process_session_absent, wait_for_opencode_process_session_state,
     wait_for_tmux_pane_current_command_to_contain, wait_for_tmux_pane_pid_to_be_non_zero,
+    FakeOpenCode, SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -238,6 +238,35 @@ fn new_without_tty_creates_alias_and_tmux_session_without_attaching() {
     assert_eq!(saved_sessions[0].directory, env.root_dir());
     assert_eq!(saved_sessions[0].opencode_args, EMPTY_ARGS_JSON);
     assert_eq!(tmux_session_attached_count(&session_name), 0);
+}
+
+#[test]
+fn new_without_tty_returns_promptly_when_session_id_is_delayed() {
+    let env = TestEnv::new("new-without-tty-delayed-session-id");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "headless");
+
+    let child = spawn_headless_new_command(&env, &fake_opencode, &["new", "headless"]);
+
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5)),
+        Duration::from_secs(5),
+        "to remain startup-only before headless command exits",
+        |row| row.reason.as_deref() == Some("startup") && row.session_id.is_none(),
+    );
+
+    wait_for_command_to_exit_successfully(
+        child,
+        "headless oc new process with delayed session id",
+        Duration::from_secs(3),
+    );
+
+    let saved_sessions = read_saved_sessions(env.aliases_file());
+    assert_eq!(saved_sessions.len(), 1);
+    assert_eq!(saved_sessions[0].name, "headless");
+    assert_eq!(saved_sessions[0].opencode_session_id, None);
 }
 
 #[test]
