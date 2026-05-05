@@ -1,6 +1,6 @@
 use oc::cli::RequestedAction;
 use oc::session::{SavedSession, SessionListEntry, SessionStatus};
-use oc::tui::command::{parse_command, CommandParseError};
+use oc::tui::command::{CommandParseError, parse_command};
 use oc::tui::filter::{build_view, summary_for_view, totals_for_rows, totals_scope_label};
 use oc::tui::format::abbreviate_directory;
 use oc::tui::render::body_scroll_for_selection;

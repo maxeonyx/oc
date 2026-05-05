@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Context, Result};
-use rusqlite::{params, Connection, ErrorCode, OpenFlags};
+use anyhow::{Context, Result, anyhow};
+use rusqlite::{Connection, ErrorCode, OpenFlags, params};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};

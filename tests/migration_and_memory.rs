@@ -1,6 +1,6 @@
 mod common;
 
-use common::{read_saved_sessions, TestEnv};
+use common::{TestEnv, read_saved_sessions};
 use predicates::prelude::*;
 use std::fs;
 use std::path::PathBuf;

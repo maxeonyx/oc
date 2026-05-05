@@ -1,6 +1,6 @@
 mod common;
 
-use common::{read_saved_sessions, saved_session_row, SavedSessionRow, TestEnv};
+use common::{SavedSessionRow, TestEnv, read_saved_sessions, saved_session_row};
 use predicates::prelude::*;
 use std::fs;
 

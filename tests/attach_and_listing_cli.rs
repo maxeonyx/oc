@@ -1,16 +1,15 @@
 mod common;
 
 use common::{
-    capture_tmux_pane, create_legacy_sessions_db, create_tmux_session_in_dir,
-    detach_tmux_client_from_session, ensure_opencode_process_session_table,
-    insert_opencode_session, read_saved_sessions, saved_sessions_table_columns,
-    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_session_attached_count,
-    update_opencode_process_session_start_ticks, update_saved_session_last_used_at,
-    wait_for_file_exists, wait_for_file_to_have_non_empty_contents,
-    wait_for_opencode_process_session_state, wait_for_saved_session_id,
-    wait_for_tmux_pane_contains, wait_for_tmux_pane_pid_to_be_non_zero,
-    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach, FakeOpenCode,
-    SavedSessionRow, TestEnv,
+    FakeOpenCode, SavedSessionRow, TestEnv, capture_tmux_pane, create_legacy_sessions_db,
+    create_tmux_session_in_dir, detach_tmux_client_from_session,
+    ensure_opencode_process_session_table, insert_opencode_session, read_saved_sessions,
+    saved_sessions_table_columns, send_keys_to_tmux_session, spawn_tmux_attach_client,
+    tmux_session_attached_count, update_opencode_process_session_start_ticks,
+    update_saved_session_last_used_at, wait_for_file_exists,
+    wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session_state,
+    wait_for_saved_session_id, wait_for_tmux_pane_contains, wait_for_tmux_pane_pid_to_be_non_zero,
+    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach,
 };
 use predicates::prelude::*;
 use serde_json::Value;
@@ -1011,8 +1010,8 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
 }
 
 #[test]
-fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_directory_has_one_root_match(
-) {
+fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_directory_has_one_root_match()
+ {
     let env = TestEnv::new("catchup-idle-single-root-match");
 
     create_saved_alias(&env, "dc", Some(env.root_dir()));
