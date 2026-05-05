@@ -1,6 +1,6 @@
 mod common;
 
-use common::{SavedSessionRow, TestEnv, read_saved_sessions, saved_session_row};
+use common::{read_saved_sessions, saved_session_row, SavedSessionRow, TestEnv};
 use predicates::prelude::*;
 use std::fs;
 
@@ -75,6 +75,25 @@ fn alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash() {
             &project_dir,
             "[\"--model\",\"gpt-5.4\",\"--sandbox\",\"read-only\"]",
         )],
+    );
+}
+
+#[test]
+fn alias_expands_tilde_directory_before_storing() {
+    let env = TestEnv::new("alias-expands-tilde-dir");
+    let fake_home = env.root_dir().join("home");
+    let project_dir = fake_home.join("project");
+    fs::create_dir_all(&project_dir).expect("test should create fake home project directory");
+
+    env.oc_cmd()
+        .env("HOME", &fake_home)
+        .args(["alias", "dc", "~/project"])
+        .assert()
+        .success();
+
+    assert_saved_sessions(
+        &env,
+        vec![saved_session_row(1, "dc", &project_dir, EMPTY_ARGS_JSON)],
     );
 }
 

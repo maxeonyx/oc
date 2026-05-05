@@ -1,15 +1,16 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, capture_tmux_pane, create_legacy_sessions_db,
-    create_tmux_session_in_dir, detach_tmux_client_from_session,
-    ensure_opencode_process_session_table, insert_opencode_session, read_saved_sessions,
-    saved_sessions_table_columns, send_keys_to_tmux_session, spawn_tmux_attach_client,
-    tmux_session_attached_count, update_opencode_process_session_start_ticks,
-    update_saved_session_last_used_at, wait_for_file_exists,
-    wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session_state,
-    wait_for_saved_session_id, wait_for_tmux_pane_contains, wait_for_tmux_pane_pid_to_be_non_zero,
-    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach,
+    capture_tmux_pane, create_legacy_sessions_db, create_tmux_session_in_dir,
+    detach_tmux_client_from_session, ensure_opencode_process_session_table,
+    insert_opencode_session, read_saved_sessions, saved_sessions_table_columns,
+    send_keys_to_tmux_session, spawn_tmux_attach_client, tmux_session_attached_count,
+    update_opencode_process_session_start_ticks, update_saved_session_last_used_at,
+    wait_for_file_exists, wait_for_file_to_have_non_empty_contents,
+    wait_for_opencode_process_session_state, wait_for_saved_session_id,
+    wait_for_tmux_pane_contains, wait_for_tmux_pane_pid_to_be_non_zero,
+    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach, FakeOpenCode,
+    SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use serde_json::Value;
@@ -370,6 +371,99 @@ fn no_arg_auto_attach_attaches_single_running_directory_match() {
     launch_via_new(&env, &fake_opencode, "dc");
 
     assert_interactive_oc_command_succeeds_after_detach(&env, &fake_opencode, &[], &session_name);
+}
+
+#[test]
+fn no_arg_auto_attach_matches_saved_tilde_directory_against_expanded_current_dir() {
+    let env = TestEnv::new("auto-attach-tilde-directory-match");
+    let fake_opencode = env.install_fake_opencode();
+    let fake_home = env.root_dir().join("home");
+    let project_dir = fake_home.join("project");
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    std::fs::create_dir_all(&project_dir)
+        .expect("fake tilde project directory should be creatable");
+
+    env.oc_cmd()
+        .env("HOME", &fake_home)
+        .args(["alias", "dc", "~/project"])
+        .assert()
+        .success();
+
+    let child = spawn_interactive_oc_with_env(
+        &env,
+        &fake_opencode,
+        &[],
+        &[(
+            "HOME",
+            fake_home.to_str().expect("fake home should be valid UTF-8"),
+        )],
+    );
+
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_file_to_have_non_empty_contents(&fake_opencode.cwd_log_path(), Duration::from_secs(5));
+    wait_for_file_to_have_non_empty_contents(
+        &fake_opencode.session_id_log_path(),
+        Duration::from_secs(5),
+    );
+    detach_after_attach(&session_name);
+
+    let output = child
+        .wait_with_output()
+        .expect("interactive oc command should exit after detach");
+    assert!(
+        output.status.success(),
+        "Expected interactive oc command to succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn no_arg_auto_attach_skips_home_directory_even_with_single_match() {
+    let env = TestEnv::new("auto-attach-skips-home-directory");
+    let fake_home = env.root_dir().join("home");
+
+    std::fs::create_dir_all(&fake_home).expect("fake home directory should be creatable");
+
+    env.oc_cmd()
+        .env("HOME", &fake_home)
+        .args(["alias", "meta", "~"])
+        .assert()
+        .success();
+
+    env.oc_cmd()
+        .env("HOME", &fake_home)
+        .current_dir(&fake_home)
+        .args(["__dump-session-list"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("name=meta dir=")
+                .and(predicate::str::contains(fake_home.display().to_string())),
+        );
+
+    let parent_session_name = format!("{}parent", env.tmux_prefix());
+    create_tmux_session_in_dir(&parent_session_name, &fake_home);
+
+    let parent_command = format!(
+        "HOME=\"{}\" OC_THEME=dark OC_ALIASES_FILE=\"{}\" OC_TMUX_PREFIX=\"{}\" OC_OPENCODE_DB=\"{}\" {}",
+        fake_home.display(),
+        env.aliases_file().display(),
+        env.tmux_prefix(),
+        env.opencode_db().display(),
+        assert_cmd::cargo::cargo_bin("oc").display()
+    );
+    send_keys_to_tmux_session(&parent_session_name, &[&parent_command, "Enter"]);
+
+    let pane =
+        wait_for_tmux_pane_contains(&parent_session_name, "filter>", Duration::from_secs(10));
+
+    assert!(pane.contains("meta"), "pane:\n{pane}");
+    assert!(
+        !pane.contains("Auto-attach failed for meta:"),
+        "pane:\n{pane}"
+    );
 }
 
 #[test]
@@ -905,8 +999,8 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
 }
 
 #[test]
-fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_directory_has_one_root_match()
- {
+fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_directory_has_one_root_match(
+) {
     let env = TestEnv::new("catchup-idle-single-root-match");
 
     create_saved_alias(&env, "dc", Some(env.root_dir()));

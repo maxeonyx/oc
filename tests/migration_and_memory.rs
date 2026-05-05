@@ -1,6 +1,6 @@
 mod common;
 
-use common::{TestEnv, read_saved_sessions};
+use common::{read_saved_sessions, TestEnv};
 use predicates::prelude::*;
 use std::fs;
 use std::path::PathBuf;
@@ -98,6 +98,48 @@ fn migrate_reports_conflicts_without_overwriting() {
     let saved = read_saved_sessions(env.aliases_file());
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].directory, env.root_dir());
+}
+
+#[test]
+fn opening_existing_db_migrates_tilde_directories_to_absolute_paths() {
+    let env = TestEnv::new("migrate-existing-tilde-directories");
+    let fake_home = env.root_dir().join("home");
+    let project_dir = fake_home.join("project");
+
+    fs::create_dir_all(&project_dir).expect("test should create fake home project directory");
+
+    common::create_legacy_sessions_db(
+        env.aliases_file(),
+        &[
+            common::SavedSessionRow {
+                id: 1,
+                name: String::from("meta"),
+                directory: PathBuf::from("~"),
+                opencode_session_id: None,
+                opencode_args: String::from("[]"),
+                last_used_at: 0,
+            },
+            common::SavedSessionRow {
+                id: 2,
+                name: String::from("dc"),
+                directory: PathBuf::from("~/project"),
+                opencode_session_id: None,
+                opencode_args: String::from("[]"),
+                last_used_at: 0,
+            },
+        ],
+    );
+
+    env.oc_cmd()
+        .env("HOME", &fake_home)
+        .args(["list"])
+        .assert()
+        .success();
+
+    let saved = read_saved_sessions(env.aliases_file());
+    assert_eq!(saved.len(), 2);
+    assert_eq!(saved[0].directory, fake_home);
+    assert_eq!(saved[1].directory, project_dir);
 }
 
 #[test]

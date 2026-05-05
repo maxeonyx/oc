@@ -1,13 +1,13 @@
 mod common;
 
 use common::{
-    FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session,
-    read_opencode_process_sessions, read_opencode_sessions, read_saved_sessions,
-    tmux_session_attached_count, update_saved_session_last_used_at, wait_for_file_contains,
-    wait_for_file_exists, wait_for_file_to_contain_parseable_u32,
+    detach_tmux_client_from_session, read_opencode_process_sessions, read_opencode_sessions,
+    read_saved_sessions, tmux_session_attached_count, update_saved_session_last_used_at,
+    wait_for_file_contains, wait_for_file_exists, wait_for_file_to_contain_parseable_u32,
     wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session,
     wait_for_opencode_process_session_absent, wait_for_opencode_process_session_state,
     wait_for_tmux_pane_current_command_to_contain, wait_for_tmux_pane_pid_to_be_non_zero,
+    FakeOpenCode, SavedSessionRow, TestEnv,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -78,9 +78,21 @@ fn spawn_headless_new_command(
     fake_opencode: &FakeOpenCode,
     args: &[&str],
 ) -> std::process::Child {
+    spawn_headless_new_command_with_lifecycle_delay(env, fake_opencode, None, args)
+}
+
+fn spawn_headless_new_command_with_lifecycle_delay(
+    env: &TestEnv,
+    fake_opencode: &FakeOpenCode,
+    delay_ms: Option<u64>,
+    args: &[&str],
+) -> std::process::Child {
     fake_opencode.reset_logs_for_launch();
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
+    if let Some(delay_ms) = delay_ms {
+        command.env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", delay_ms.to_string());
+    }
     command
         .args(args)
         .stdin(Stdio::null())
@@ -246,7 +258,12 @@ fn new_without_tty_returns_promptly_when_session_id_is_delayed() {
     let fake_opencode = env.install_fake_opencode();
     let session_name = managed_tmux_session_name(&env, "headless");
 
-    let child = spawn_headless_new_command(&env, &fake_opencode, &["new", "headless"]);
+    let child = spawn_headless_new_command_with_lifecycle_delay(
+        &env,
+        &fake_opencode,
+        Some(1_500),
+        &["new", "headless"],
+    );
 
     env.wait_for_tmux_session_exists(&session_name);
     wait_for_opencode_process_session_state(
