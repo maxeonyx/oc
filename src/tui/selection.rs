@@ -1,5 +1,7 @@
 use super::types::{DashboardAction, DashboardRow, DashboardView, InputMode};
 
+use crate::directory_identity::directories_match;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectedSession(pub i64);
 
@@ -58,7 +60,7 @@ pub fn default_selected_identity(
 ) -> Option<SelectedSession> {
     if let Some(current_directory) = current_directory {
         for session in view.sessions() {
-            if session.full_directory == current_directory {
+            if directories_match(&session.full_directory, current_directory) {
                 return Some(SelectedSession(session.session_id));
             }
         }

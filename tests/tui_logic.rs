@@ -260,25 +260,17 @@ fn default_selection_prefers_directory_match_first() {
 
 #[test]
 fn default_selection_matches_tilde_directory_against_expanded_current_directory() {
+    let home = std::env::var("HOME").expect("HOME should be set for tests");
+    let home_path = PathBuf::from(home);
+    let project_path = home_path.join("project");
+
     let snapshot = DashboardSnapshot::from_session_entries(vec![
         session_entry(1, "meta", "~/", None, SessionStatus::Saved),
         session_entry(2, "project", "~/project", None, SessionStatus::Saved),
     ]);
-    let view = build_view(
-        &snapshot,
-        "",
-        InputMode::Filter,
-        Some(PathBuf::from("/home/test/project")),
-    );
+    let view = build_view(&snapshot, "", InputMode::Filter, Some(project_path.clone()));
 
-    assert_eq!(
-        select_index(
-            &view,
-            None,
-            Some(PathBuf::from("/home/test/project").as_path())
-        ),
-        1
-    );
+    assert_eq!(select_index(&view, None, Some(project_path.as_path())), 1);
 }
 
 #[test]

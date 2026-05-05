@@ -161,6 +161,16 @@ fn spawn_interactive_oc_with_env(
     args: &[&str],
     extra_env: &[(&str, &str)],
 ) -> std::process::Child {
+    spawn_interactive_oc_in_dir_with_env(env, fake_opencode, env.root_dir(), args, extra_env)
+}
+
+fn spawn_interactive_oc_in_dir_with_env(
+    env: &TestEnv,
+    fake_opencode: &FakeOpenCode,
+    current_dir: &Path,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> std::process::Child {
     fake_opencode.reset_logs_for_launch();
     let mut command = env.std_oc_cmd();
     fake_opencode.apply_to_command(&mut command);
@@ -168,6 +178,7 @@ fn spawn_interactive_oc_with_env(
         command.env(key, value);
     }
     command
+        .current_dir(current_dir)
         .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
         .args(args)
         .stdin(Stdio::null())
@@ -390,9 +401,10 @@ fn no_arg_auto_attach_matches_saved_tilde_directory_against_expanded_current_dir
         .assert()
         .success();
 
-    let child = spawn_interactive_oc_with_env(
+    let child = spawn_interactive_oc_in_dir_with_env(
         &env,
         &fake_opencode,
+        &project_dir,
         &[],
         &[(
             "HOME",
@@ -1059,7 +1071,7 @@ fn session_list_catchup_matches_tilde_alias_directory_against_expanded_home_path
         vec![SavedSessionRow {
             id: 1,
             name: String::from("dc"),
-            directory: Path::new("~/project").to_path_buf(),
+            directory: project_dir,
             opencode_session_id: Some(String::from("ses_tilde_match")),
             opencode_args: String::from(EMPTY_ARGS_JSON),
             last_used_at: 0,

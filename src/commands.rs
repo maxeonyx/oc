@@ -1,9 +1,10 @@
 use anyhow::Result;
 use std::env;
-use std::io::{IsTerminal, stdin};
+use std::io::{stdin, IsTerminal};
 use std::path::PathBuf;
 
 use crate::cli::RequestedAction;
+use crate::directory_identity::is_home_directory;
 use crate::list_output::{render_json, render_table, rows_from_entries};
 use crate::service::SessionService;
 use crate::tmux;
@@ -37,6 +38,11 @@ enum AutoAttachResult {
 }
 
 fn auto_attach_result(service: &SessionService) -> Result<AutoAttachResult> {
+    let current_directory = env::current_dir()?;
+    if is_home_directory(&current_directory) {
+        return Ok(AutoAttachResult::NoMatch);
+    }
+
     let matches = service.current_directory_matches()?;
     let [saved_session] = matches.as_slice() else {
         return Ok(AutoAttachResult::NoMatch);

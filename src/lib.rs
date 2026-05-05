@@ -2,6 +2,7 @@ pub mod app;
 pub mod cli;
 pub mod commands;
 pub mod config;
+pub mod directory_identity;
 pub mod list_output;
 mod opencode_db;
 pub mod service;

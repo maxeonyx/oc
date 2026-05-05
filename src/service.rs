@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -7,6 +7,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::config::RuntimeConfig;
+use crate::directory_identity::{
+    directories_match, is_home_directory, normalize_directory_for_storage,
+};
 use crate::opencode_db::{
     OpenCodeDb, ProcessSessionLookup, ProcessSessionRowLookup, ProcessSessionTableLookup,
     RootSessionIdLookup,
@@ -247,7 +250,16 @@ impl SessionService {
     }
 
     pub fn auto_attach_directory_match(&self) -> Result<bool> {
-        match self.current_directory_matches()?.as_slice() {
+        let current_directory =
+            env::current_dir().context("failed to determine current working directory")?;
+        if is_home_directory(&current_directory) {
+            return Ok(false);
+        }
+
+        match self
+            .current_directory_matches_in(&current_directory)?
+            .as_slice()
+        {
             [saved_session] => {
                 self.activate_session(saved_session)?;
                 Ok(true)
@@ -259,8 +271,12 @@ impl SessionService {
     pub fn current_directory_matches(&self) -> Result<Vec<SavedSession>> {
         let current_directory =
             env::current_dir().context("failed to determine current working directory")?;
+        self.current_directory_matches_in(&current_directory)
+    }
+
+    fn current_directory_matches_in(&self, current_directory: &Path) -> Result<Vec<SavedSession>> {
         let store = self.open_session_store()?;
-        find_saved_sessions_in_directory(&store, &current_directory)
+        find_saved_sessions_in_directory(&store, current_directory)
     }
 
     pub fn migrate_legacy_aliases(&self) -> Result<MigrationReport> {
@@ -773,8 +789,12 @@ fn parse_legacy_alias_line(line: &str) -> Result<NewSessionAlias> {
     let raw_args = fields.next().unwrap_or("");
     let (opencode_session_id, opencode_args) = parse_legacy_opencode_args(raw_args);
 
-    NewSessionAlias::new(String::from(name), PathBuf::from(directory), opencode_args)
-        .map(|alias| alias.with_opencode_session_id(opencode_session_id))
+    NewSessionAlias::new(
+        String::from(name),
+        normalize_directory_for_storage(Path::new(directory))?,
+        opencode_args,
+    )
+    .map(|alias| alias.with_opencode_session_id(opencode_session_id))
 }
 
 fn parse_legacy_opencode_args(raw_args: &str) -> (Option<String>, Vec<String>) {
@@ -813,8 +833,10 @@ fn launch_opencode_args(saved_session: &SavedSession) -> Vec<String> {
 
 fn resolve_alias_directory(dir: Option<PathBuf>) -> Result<PathBuf> {
     match dir {
-        Some(path) => Ok(path),
-        None => env::current_dir().context("failed to determine current working directory"),
+        Some(path) => normalize_directory_for_storage(&path),
+        None => normalize_directory_for_storage(
+            &env::current_dir().context("failed to determine current working directory")?,
+        ),
     }
 }
 
@@ -854,7 +876,7 @@ fn find_saved_sessions_in_directory(
     Ok(store
         .list_saved_sessions()?
         .into_iter()
-        .filter(|saved_session| saved_session.directory == directory)
+        .filter(|saved_session| directories_match(&saved_session.directory, directory))
         .collect())
 }
 

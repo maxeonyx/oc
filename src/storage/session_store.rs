@@ -1,9 +1,10 @@
-use anyhow::{Context, Result, anyhow, bail};
-use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, params};
+use anyhow::{anyhow, bail, Context, Result};
+use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::directory_identity::normalize_directory_for_storage;
 use crate::session::{NewSessionAlias, SavedSession, SessionRef};
 
 use super::schema;
@@ -73,11 +74,12 @@ impl SessionStore {
     }
 
     pub fn update_directory(&mut self, name: &str, directory: &Path) -> Result<()> {
+        let normalized_directory = normalize_directory_for_storage(directory)?;
         let updated_rows = self
             .connection
             .execute(
                 "UPDATE sessions SET directory = ?1 WHERE name = ?2",
-                params![directory.display().to_string(), name],
+                params![normalized_directory.display().to_string(), name],
             )
             .with_context(|| {
                 format!("failed to update directory for session alias '{name}' in storage")
@@ -272,7 +274,9 @@ fn deserialize_opencode_args(opencode_args_json: String) -> Result<Vec<String>> 
 }
 
 fn insert_alias_row(transaction: &Transaction<'_>, id: i64, alias: &NewSessionAlias) -> Result<()> {
-    let directory = alias.directory.display().to_string();
+    let directory = normalize_directory_for_storage(&alias.directory)?
+        .display()
+        .to_string();
     let serialized_opencode_args = serialize_opencode_args(&alias.opencode_args)?;
 
     match transaction.execute(

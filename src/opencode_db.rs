@@ -1,9 +1,10 @@
-use anyhow::{Context, Result, anyhow};
-use rusqlite::{Connection, ErrorCode, OpenFlags, params};
+use anyhow::{anyhow, Context, Result};
+use rusqlite::{params, Connection, ErrorCode, OpenFlags};
 use std::collections::BTreeSet;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::directory_identity::normalize_directory_for_match;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RootSessionIdLookup {
@@ -270,20 +271,6 @@ fn process_start_ticks_match(pid: u32, expected_ticks: u64) -> Result<bool> {
 
 fn parse_proc_start_ticks(stat_contents: &str) -> Option<u64> {
     stat_contents.split_whitespace().nth(21)?.parse().ok()
-}
-
-fn normalize_directory_for_match(directory: &Path) -> PathBuf {
-    expand_tilde_path(directory).unwrap_or_else(|| directory.to_path_buf())
-}
-
-fn expand_tilde_path(path: &Path) -> Option<PathBuf> {
-    let path_str = path.to_str()?;
-    if path_str == "~" {
-        return env::var_os("HOME").map(PathBuf::from);
-    }
-
-    let remainder = path_str.strip_prefix("~/")?;
-    env::var_os("HOME").map(|home| PathBuf::from(home).join(remainder))
 }
 
 fn is_unavailable_error(error: &rusqlite::Error) -> bool {
