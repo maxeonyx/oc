@@ -17,13 +17,11 @@ use crate::storage::SessionStore;
 use crate::tmux::Tmux;
 
 const ATTACH_SESSION_ID_CAPTURE_POLL_INTERVAL_MS: u64 = 1_000;
-const SESSION_ID_CAPTURE_POLL_ATTEMPTS: usize = 200;
-const SESSION_ID_CAPTURE_POLL_INTERVAL_MS: u64 = 100;
 
-enum PidCaptureProbe {
+enum SessionIdCaptureProbe {
     SessionId(String),
-    Retry,
-    FallbackAllowed,
+    RetryLater,
+    CompatibilityFallbackAllowed,
     Stop,
 }
 
@@ -34,27 +32,20 @@ struct AttachSessionIdCapture {
 }
 
 impl AttachSessionIdCapture {
-    fn observe(&mut self, probe: PidCaptureProbe) -> bool {
+    fn observe(&mut self, probe: SessionIdCaptureProbe) -> bool {
         match probe {
-            PidCaptureProbe::SessionId(session_id) => {
+            SessionIdCaptureProbe::SessionId(session_id) => {
                 self.latest_session_id = Some(session_id);
                 false
             }
-            PidCaptureProbe::Retry => false,
-            PidCaptureProbe::FallbackAllowed => {
+            SessionIdCaptureProbe::RetryLater => false,
+            SessionIdCaptureProbe::CompatibilityFallbackAllowed => {
                 self.fallback_allowed = true;
                 false
             }
-            PidCaptureProbe::Stop => true,
+            SessionIdCaptureProbe::Stop => true,
         }
     }
-}
-
-enum PersistedPidCaptureOutcome {
-    Captured,
-    Retry,
-    FallbackAllowed,
-    Stop,
 }
 
 #[derive(Debug, Clone)]
@@ -136,9 +127,8 @@ impl SessionService {
     }
 
     pub fn list_dashboard_sessions(&self) -> Result<Vec<SessionListEntry>> {
-        let mut store = self.open_session_store()?;
+        let store = self.open_session_store()?;
         let tmux = self.open_tmux();
-        self.catch_up_missing_session_ids(&tmux, &mut store)?;
         let saved_sessions = store.list_saved_sessions()?;
         let runtimes = tmux.list_managed_sessions()?;
 
@@ -147,6 +137,14 @@ impl SessionService {
             runtimes,
             tmux.managed_session_prefix(),
         )
+    }
+
+    pub fn reconcile_missing_session_ids_once(&self) -> Result<bool> {
+        let tmux = self.open_tmux();
+        let opencode_db = self.open_opencode_db();
+        let mut store = self.open_session_store()?;
+
+        self.reconcile_missing_session_ids_once_with(&tmux, &opencode_db, &mut store)
     }
 
     pub fn resolve_session_ref(&self, target: &str) -> Result<SavedSession> {
@@ -416,16 +414,25 @@ impl SessionService {
         directory_compatibility_fallback_snapshot: Option<BTreeSet<String>>,
     ) -> Result<()> {
         let stop_flag = AtomicBool::new(false);
+        let opencode_db = self.open_opencode_db();
         let capture = std::thread::scope(|scope| -> Result<AttachSessionIdCapture> {
             let capture_handle = scope.spawn(|| {
-                self.poll_session_id_during_attach(tmux, &launch.tmux_session_name, &stop_flag)
+                self.poll_session_id_during_attach(
+                    tmux,
+                    &opencode_db,
+                    &launch.tmux_session_name,
+                    &stop_flag,
+                )
             });
 
             let attach_result = self.attach_to_session(tmux, launch);
             stop_flag.store(true, Ordering::Relaxed);
 
-            let final_probe =
-                self.capture_session_id_probe_for_tmux_session(tmux, &launch.tmux_session_name)?;
+            let final_probe = self.capture_session_id_probe_for_tmux_session(
+                tmux,
+                &opencode_db,
+                &launch.tmux_session_name,
+            )?;
             let mut capture = capture_handle
                 .join()
                 .map_err(|_| anyhow!("session ID capture thread panicked during tmux attach"))??;
@@ -454,42 +461,45 @@ impl SessionService {
         directory_compatibility_fallback_snapshot: Option<BTreeSet<String>>,
     ) -> Result<()> {
         let tmux_session_name = tmux.managed_session_name(&saved_session.name);
-        let mut fallback_allowed = false;
-
-        for _ in 0..SESSION_ID_CAPTURE_POLL_ATTEMPTS {
-            if let Some(pid) = tmux.pane_pid(&tmux_session_name)? {
-                match self.capture_session_id_via_pid(store, saved_session, pid)? {
-                    PersistedPidCaptureOutcome::Captured | PersistedPidCaptureOutcome::Stop => {
-                        return Ok(());
-                    }
-                    PersistedPidCaptureOutcome::Retry => {}
-                    PersistedPidCaptureOutcome::FallbackAllowed => fallback_allowed = true,
-                }
+        let opencode_db = self.open_opencode_db();
+        let Some(pid) = tmux.pane_pid(&tmux_session_name)? else {
+            if let Some(directory_compatibility_fallback_snapshot) =
+                directory_compatibility_fallback_snapshot
+            {
+                self.capture_session_id_via_directory_compatibility_fallback(
+                    store,
+                    saved_session,
+                    &directory_compatibility_fallback_snapshot,
+                )?;
             }
-
-            std::thread::sleep(Duration::from_millis(SESSION_ID_CAPTURE_POLL_INTERVAL_MS));
-        }
-
-        if !fallback_allowed {
-            return Ok(());
-        }
-
-        let Some(directory_compatibility_fallback_snapshot) =
-            directory_compatibility_fallback_snapshot
-        else {
             return Ok(());
         };
 
-        self.capture_session_id_via_directory_compatibility_fallback(
-            store,
-            saved_session,
-            &directory_compatibility_fallback_snapshot,
-        )
+        match self.capture_session_id_probe_via_pid(&opencode_db, pid)? {
+            SessionIdCaptureProbe::SessionId(session_id) => {
+                self.persist_captured_session_id(store, saved_session, &session_id)
+            }
+            SessionIdCaptureProbe::CompatibilityFallbackAllowed => {
+                let Some(directory_compatibility_fallback_snapshot) =
+                    directory_compatibility_fallback_snapshot
+                else {
+                    return Ok(());
+                };
+
+                self.capture_session_id_via_directory_compatibility_fallback(
+                    store,
+                    saved_session,
+                    &directory_compatibility_fallback_snapshot,
+                )
+            }
+            SessionIdCaptureProbe::RetryLater | SessionIdCaptureProbe::Stop => Ok(()),
+        }
     }
 
     fn poll_session_id_during_attach(
         &self,
         tmux: &Tmux,
+        opencode_db: &OpenCodeDb,
         tmux_session_name: &str,
         stop_flag: &AtomicBool,
     ) -> Result<AttachSessionIdCapture> {
@@ -497,7 +507,8 @@ impl SessionService {
 
         loop {
             if let Some(pid) = tmux.pane_pid(tmux_session_name)? {
-                let should_stop = capture.observe(self.capture_session_id_probe_via_pid(pid)?);
+                let should_stop =
+                    capture.observe(self.capture_session_id_probe_via_pid(opencode_db, pid)?);
                 if should_stop {
                     return Ok(capture);
                 }
@@ -516,13 +527,16 @@ impl SessionService {
     fn capture_session_id_probe_for_tmux_session(
         &self,
         tmux: &Tmux,
+        opencode_db: &OpenCodeDb,
         tmux_session_name: &str,
-    ) -> Result<Option<PidCaptureProbe>> {
+    ) -> Result<Option<SessionIdCaptureProbe>> {
         let Some(pid) = tmux.pane_pid(tmux_session_name)? else {
             return Ok(None);
         };
 
-        Ok(Some(self.capture_session_id_probe_via_pid(pid)?))
+        Ok(Some(
+            self.capture_session_id_probe_via_pid(opencode_db, pid)?,
+        ))
     }
 
     fn persist_attach_session_id_capture(
@@ -553,128 +567,65 @@ impl SessionService {
         )
     }
 
-    fn catch_up_missing_session_ids(&self, tmux: &Tmux, store: &mut SessionStore) -> Result<()> {
+    fn reconcile_missing_session_ids_once_with(
+        &self,
+        tmux: &Tmux,
+        opencode_db: &OpenCodeDb,
+        store: &mut SessionStore,
+    ) -> Result<bool> {
         let saved_sessions = store.list_saved_sessions()?;
-        let opencode_db = self.open_opencode_db();
-
-        match opencode_db.process_session_table_lookup()? {
-            ProcessSessionTableLookup::Available => {
-                for saved_session in saved_sessions {
-                    if saved_session.opencode_session_id.is_some() {
-                        continue;
-                    }
-
-                    let tmux_session_name =
-                        saved_session.managed_tmux_session_name(tmux.managed_session_prefix());
-                    let Some(pid) = tmux.pane_pid(&tmux_session_name)? else {
-                        self.catch_up_session_id_via_directory_compatibility_fallback(
-                            &opencode_db,
-                            store,
-                            &saved_session,
-                        )?;
-                        continue;
-                    };
-
-                    match self.capture_session_id_via_pid_polling(store, &saved_session, pid)? {
-                        PersistedPidCaptureOutcome::Captured | PersistedPidCaptureOutcome::Stop => {
-                            continue;
-                        }
-                        PersistedPidCaptureOutcome::Retry
-                        | PersistedPidCaptureOutcome::FallbackAllowed => {}
-                    }
-
-                    self.catch_up_session_id_via_directory_compatibility_fallback(
-                        &opencode_db,
-                        store,
-                        &saved_session,
-                    )?;
-                }
-
-                return Ok(());
-            }
-            ProcessSessionTableLookup::Missing => {}
-            ProcessSessionTableLookup::Unavailable => return Ok(()),
-        }
+        let mut changed = false;
 
         for saved_session in saved_sessions {
             if saved_session.opencode_session_id.is_some() {
                 continue;
             }
 
-            self.catch_up_session_id_via_directory_compatibility_fallback(
-                &opencode_db,
-                store,
-                &saved_session,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    fn capture_session_id_via_pid(
-        &self,
-        store: &mut SessionStore,
-        saved_session: &SavedSession,
-        pid: u32,
-    ) -> Result<PersistedPidCaptureOutcome> {
-        match self.capture_session_id_probe_via_pid(pid)? {
-            PidCaptureProbe::SessionId(session_id) => {
-                self.persist_captured_session_id(store, saved_session, &session_id)?;
-                Ok(PersistedPidCaptureOutcome::Captured)
+            let tmux_session_name =
+                saved_session.managed_tmux_session_name(tmux.managed_session_prefix());
+            match tmux.pane_pid(&tmux_session_name)? {
+                Some(pid) => match self.capture_session_id_probe_via_pid(opencode_db, pid)? {
+                    SessionIdCaptureProbe::SessionId(session_id) => {
+                        self.persist_captured_session_id(store, &saved_session, &session_id)?;
+                        changed = true;
+                    }
+                    SessionIdCaptureProbe::RetryLater
+                    | SessionIdCaptureProbe::CompatibilityFallbackAllowed
+                    | SessionIdCaptureProbe::Stop => {}
+                },
+                None => {
+                    changed |= self.adopt_session_id_via_directory_if_unambiguous(
+                        opencode_db,
+                        store,
+                        &saved_session,
+                    )?;
+                }
             }
-            PidCaptureProbe::Retry => Ok(PersistedPidCaptureOutcome::Retry),
-            PidCaptureProbe::FallbackAllowed => Ok(PersistedPidCaptureOutcome::FallbackAllowed),
-            PidCaptureProbe::Stop => Ok(PersistedPidCaptureOutcome::Stop),
         }
+
+        Ok(changed)
     }
 
-    fn capture_session_id_probe_via_pid(&self, pid: u32) -> Result<PidCaptureProbe> {
-        match self.open_opencode_db().process_session_id_for_pid(pid)? {
+    fn capture_session_id_probe_via_pid(
+        &self,
+        opencode_db: &OpenCodeDb,
+        pid: u32,
+    ) -> Result<SessionIdCaptureProbe> {
+        match opencode_db.process_session_id_for_pid(pid)? {
             ProcessSessionLookup::Available(ProcessSessionRowLookup::SessionId(session_id)) => {
-                Ok(PidCaptureProbe::SessionId(session_id))
+                Ok(SessionIdCaptureProbe::SessionId(session_id))
             }
             // Only a missing table permits the old directory-based compatibility fallback.
             ProcessSessionLookup::Available(ProcessSessionRowLookup::TableMissing) => {
-                Ok(PidCaptureProbe::FallbackAllowed)
+                Ok(SessionIdCaptureProbe::CompatibilityFallbackAllowed)
             }
             ProcessSessionLookup::Available(
                 ProcessSessionRowLookup::RowMissing | ProcessSessionRowLookup::SessionIdMissing,
-            ) => Ok(PidCaptureProbe::Retry),
-            ProcessSessionLookup::Available(ProcessSessionRowLookup::Stale)
-            | ProcessSessionLookup::Unavailable => Ok(PidCaptureProbe::Stop),
-        }
-    }
-
-    fn capture_session_id_via_pid_polling(
-        &self,
-        store: &mut SessionStore,
-        saved_session: &SavedSession,
-        pid: u32,
-    ) -> Result<PersistedPidCaptureOutcome> {
-        let mut fallback_allowed = false;
-
-        for _ in 0..SESSION_ID_CAPTURE_POLL_ATTEMPTS {
-            match self.capture_session_id_via_pid(store, saved_session, pid)? {
-                outcome @ (PersistedPidCaptureOutcome::Captured
-                | PersistedPidCaptureOutcome::Stop) => return Ok(outcome),
-                PersistedPidCaptureOutcome::Retry => {}
-                PersistedPidCaptureOutcome::FallbackAllowed => fallback_allowed = true,
+            ) => Ok(SessionIdCaptureProbe::RetryLater),
+            ProcessSessionLookup::Available(ProcessSessionRowLookup::Stale) => {
+                Ok(SessionIdCaptureProbe::Stop)
             }
-
-            std::thread::sleep(Duration::from_millis(SESSION_ID_CAPTURE_POLL_INTERVAL_MS));
-        }
-
-        match self.capture_session_id_via_pid(store, saved_session, pid)? {
-            outcome @ (PersistedPidCaptureOutcome::Captured
-            | PersistedPidCaptureOutcome::Stop
-            | PersistedPidCaptureOutcome::FallbackAllowed) => return Ok(outcome),
-            PersistedPidCaptureOutcome::Retry => {}
-        }
-
-        if fallback_allowed {
-            Ok(PersistedPidCaptureOutcome::FallbackAllowed)
-        } else {
-            Ok(PersistedPidCaptureOutcome::Retry)
+            ProcessSessionLookup::Unavailable => Ok(SessionIdCaptureProbe::RetryLater),
         }
     }
 
@@ -684,42 +635,63 @@ impl SessionService {
         saved_session: &SavedSession,
         directory_compatibility_fallback_snapshot: &BTreeSet<String>,
     ) -> Result<()> {
-        let RootSessionIdLookup::Available(after_launch_ids) = self
-            .open_opencode_db()
-            .root_session_ids_for_directory(&saved_session.directory)?
+        let Some(captured_id) = self.new_root_session_id_since_snapshot(
+            &self.open_opencode_db(),
+            &saved_session.directory,
+            directory_compatibility_fallback_snapshot,
+        )?
         else {
             return Ok(());
         };
 
-        let new_ids = after_launch_ids
-            .difference(directory_compatibility_fallback_snapshot)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if let [captured_id] = new_ids.as_slice() {
-            self.persist_captured_session_id(store, saved_session, captured_id)?;
-        }
-
-        Ok(())
+        self.persist_captured_session_id(store, saved_session, &captured_id)
     }
 
-    fn catch_up_session_id_via_directory_compatibility_fallback(
+    fn adopt_session_id_via_directory_if_unambiguous(
         &self,
         opencode_db: &OpenCodeDb,
         store: &mut SessionStore,
         saved_session: &SavedSession,
-    ) -> Result<()> {
-        let RootSessionIdLookup::Available(ids) =
-            opencode_db.root_session_ids_for_directory(&saved_session.directory)?
+    ) -> Result<bool> {
+        let Some(captured_id) =
+            self.unambiguous_root_session_id_for_directory(opencode_db, &saved_session.directory)?
         else {
-            return Ok(());
+            return Ok(false);
         };
 
-        if let [captured_id] = ids.iter().collect::<Vec<_>>().as_slice() {
-            self.persist_captured_session_id(store, saved_session, captured_id.as_str())?;
-        }
+        self.persist_captured_session_id(store, saved_session, &captured_id)?;
+        Ok(true)
+    }
 
-        Ok(())
+    fn new_root_session_id_since_snapshot(
+        &self,
+        opencode_db: &OpenCodeDb,
+        directory: &Path,
+        before_launch_ids: &BTreeSet<String>,
+    ) -> Result<Option<String>> {
+        let RootSessionIdLookup::Available(after_launch_ids) =
+            opencode_db.root_session_ids_for_directory(directory)?
+        else {
+            return Ok(None);
+        };
+
+        Ok(single_session_id(
+            after_launch_ids.difference(before_launch_ids).cloned(),
+        ))
+    }
+
+    fn unambiguous_root_session_id_for_directory(
+        &self,
+        opencode_db: &OpenCodeDb,
+        directory: &Path,
+    ) -> Result<Option<String>> {
+        let RootSessionIdLookup::Available(ids) =
+            opencode_db.root_session_ids_for_directory(directory)?
+        else {
+            return Ok(None);
+        };
+
+        Ok(single_session_id(ids.into_iter()))
     }
 
     fn persist_captured_session_id(
@@ -884,4 +856,16 @@ fn find_saved_sessions_in_directory(
         .into_iter()
         .filter(|saved_session| saved_session.directory == directory)
         .collect())
+}
+
+fn single_session_id<I>(mut ids: I) -> Option<String>
+where
+    I: Iterator<Item = String>,
+{
+    let first = ids.next()?;
+    if ids.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
 }

@@ -119,6 +119,7 @@ fn should_attach_new_session() -> bool {
 }
 
 fn run_dump_session_list(service: &SessionService) -> Result<()> {
+    service.reconcile_missing_session_ids_once()?;
     for session in service.list_dashboard_sessions()? {
         println!("{}", session.debug_dump_line());
     }
@@ -127,6 +128,7 @@ fn run_dump_session_list(service: &SessionService) -> Result<()> {
 }
 
 fn run_list(service: &SessionService, json: bool) -> Result<()> {
+    service.reconcile_missing_session_ids_once()?;
     let rows = rows_from_entries(service.list_dashboard_sessions()?);
 
     if json {

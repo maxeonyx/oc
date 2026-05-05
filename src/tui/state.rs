@@ -30,6 +30,7 @@ use super::types::{
 };
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+const SESSION_ID_RECONCILIATION_INTERVAL: Duration = Duration::from_secs(3);
 
 pub struct DashboardState {
     pub snapshot: DashboardSnapshot,
@@ -44,6 +45,7 @@ pub struct DashboardState {
     list_body_scroll: usize,
     terminal_area: Rect,
     pending_restart: Option<PendingRestart>,
+    last_session_id_reconciliation_at: Instant,
     selected_identity: Option<SelectedSession>,
 }
 
@@ -183,6 +185,7 @@ impl DashboardState {
             list_body_scroll: 0,
             terminal_area,
             pending_restart: None,
+            last_session_id_reconciliation_at: Instant::now(),
             selected_identity,
         };
 
@@ -453,6 +456,13 @@ impl DashboardState {
     }
 
     fn poll_background_work(&mut self, service: &SessionService) -> Result<()> {
+        if self.last_session_id_reconciliation_at.elapsed() >= SESSION_ID_RECONCILIATION_INTERVAL {
+            self.last_session_id_reconciliation_at = Instant::now();
+            if service.reconcile_missing_session_ids_once()? {
+                self.refresh(service)?;
+            }
+        }
+
         let Some(pending_restart) = self.pending_restart.take() else {
             return Ok(());
         };
