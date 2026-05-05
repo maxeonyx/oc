@@ -45,13 +45,13 @@ The repo pins Rust via `rust-toolchain.toml`; CI should use that same toolchain.
 
 **After pushing, agents must monitor CI** (`gh run list --limit 1`) and confirm the pipeline passes. If CI fails, fix it before moving on.
 
-**Installing locally:** Do not use `cargo install`. Download the released binary from GitHub:
+**Installing locally:** Do not use `cargo install`. Download the released binary from GitHub to `~/.local/bin/`:
 
 ```bash
-curl -fsSL https://github.com/maxeonyx/oc/releases/latest/download/oc-x86_64-linux -o ~/.cargo/bin/oc && chmod +x ~/.cargo/bin/oc
+curl -fsSL https://github.com/maxeonyx/oc/releases/latest/download/oc-x86_64-linux -o /tmp/oc-download && chmod +x /tmp/oc-download && mv /tmp/oc-download ~/.local/bin/oc
 ```
 
-Only the linux x86_64 target is built.
+The download-then-rename pattern avoids "Text file busy" errors when the binary is currently running. Only the linux x86_64 target is built.
 
 ## Git identity
 
