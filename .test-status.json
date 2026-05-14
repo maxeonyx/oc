@@ -95,8 +95,5 @@
     "oc::tui_logic$totals_only_count_session_rows": "passing",
     "oc::tui_logic$totals_scope_label_depends_on_filter_state": "passing",
     "oc::version_smoke$version_flag_prints_package_version": "passing"
-  },
-  "renames": {
-    "oc::alias_cli$alias_uses_explicit_dir_without_storing_launch_args": "oc::alias_cli$alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash"
   }
 }

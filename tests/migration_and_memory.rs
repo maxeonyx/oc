@@ -135,6 +135,20 @@ fn opening_existing_db_migrates_tilde_directories_to_absolute_paths() {
     assert_eq!(saved.len(), 2);
     assert_eq!(saved[0].directory, fake_home);
     assert_eq!(saved[1].directory, project_dir);
+
+    let connection = rusqlite::Connection::open(env.aliases_file()).expect("session db should open");
+    let columns = connection
+        .prepare("PRAGMA table_info(sessions)")
+        .expect("schema query should prepare")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("schema query should run")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("schema columns should decode");
+
+    assert!(
+        !columns.iter().any(|column| column == "opencode_args"),
+        "expected sessions table migration to drop opencode_args column, got {columns:?}"
+    );
 }
 
 #[test]
