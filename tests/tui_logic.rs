@@ -162,7 +162,7 @@ fn command_parser_supports_dashboard_commands() {
         RequestedAction::New {
             name: String::from("dc"),
             dir: None,
-            opencode_args: Vec::new(),
+            launch_args: Vec::new(),
         }
     );
     assert_eq!(

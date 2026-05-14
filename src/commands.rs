@@ -90,12 +90,12 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
         RequestedAction::New {
             name,
             dir,
-            opencode_args,
+            launch_args,
         } => {
             if should_attach_new_session() {
-                service.create_session(name, dir, opencode_args)
+                service.create_session(name, dir, launch_args)
             } else {
-                service.create_session_headless(name, dir, opencode_args)
+                service.create_session_headless(name, dir, launch_args)
             }
         }
         RequestedAction::Alias { name, dir } => service.save_alias(name, dir),

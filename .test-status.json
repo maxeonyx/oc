@@ -6,7 +6,7 @@
     "oc::alias_cli$alias_expands_tilde_directory_before_storing": "passing",
     "oc::alias_cli$alias_rejects_duplicate_name": "passing",
     "oc::alias_cli$alias_rejects_plain_numeric_name": "passing",
-    "oc::alias_cli$alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash": "passing",
+    "oc::alias_cli$alias_uses_explicit_dir_without_storing_launch_args": "passing",
     "oc::alias_cli$unalias_missing_name_fails_cleanly": "passing",
     "oc::alias_cli$unalias_removes_mapping_by_name": "passing",
     "oc::attach_and_listing_cli$bare_target_attach_falls_back_to_dashboard_when_attach_fails": "passing",
@@ -95,5 +95,8 @@
     "oc::tui_logic$totals_only_count_session_rows": "passing",
     "oc::tui_logic$totals_scope_label_depends_on_filter_state": "passing",
     "oc::version_smoke$version_flag_prints_package_version": "passing"
+  },
+  "renames": {
+    "oc::alias_cli$alias_uses_explicit_dir_without_storing_launch_args": "oc::alias_cli$alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash"
   }
 }

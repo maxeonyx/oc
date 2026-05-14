@@ -36,7 +36,7 @@ fn alias_creates_db_and_inserts_session_with_default_dir() {
 }
 
 #[test]
-fn alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash() {
+fn alias_uses_explicit_dir_without_storing_launch_args() {
     let env = TestEnv::new("alias-explicit-dir");
     let project_dir = env.root_dir().join("project");
     fs::create_dir_all(&project_dir).expect("test should create explicit project directory");

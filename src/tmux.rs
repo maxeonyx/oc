@@ -31,10 +31,10 @@ impl Tmux {
         &self,
         session_name: &str,
         directory: &Path,
-        opencode_args: &[String],
+        launch_args: &[String],
     ) -> Result<()> {
         run_tmux_checked(
-            new_session_command(session_name, directory, opencode_args),
+            new_session_command(session_name, directory, launch_args),
             format!("start tmux session '{session_name}'"),
         )?;
 
@@ -120,13 +120,13 @@ impl Tmux {
         &self,
         session_name: &str,
         directory: &Path,
-        opencode_args: &[String],
+        launch_args: &[String],
     ) -> Result<()> {
         self.graceful_stop(session_name)?;
 
         wait_for_session_exit(session_name, std::time::Duration::from_secs(10))?;
 
-        self.launch_opencode_session(session_name, directory, opencode_args)?;
+        self.launch_opencode_session(session_name, directory, launch_args)?;
         wait_for_pane(session_name, std::time::Duration::from_secs(10))?;
         self.send_keys(session_name, &["continue", "Enter"])?;
 
@@ -290,7 +290,7 @@ fn current_environment_args() -> Vec<OsString> {
         .collect()
 }
 
-fn new_session_command(session_name: &str, directory: &Path, opencode_args: &[String]) -> Command {
+fn new_session_command(session_name: &str, directory: &Path, launch_args: &[String]) -> Command {
     let mut command = Command::new("tmux");
     command
         .arg("new-session")
@@ -302,7 +302,7 @@ fn new_session_command(session_name: &str, directory: &Path, opencode_args: &[St
         .arg("env")
         .args(current_environment_args())
         .arg("opencode")
-        .args(opencode_args);
+        .args(launch_args);
 
     command
 }

@@ -23,7 +23,7 @@ pub fn parse_command(input: &str) -> Result<RequestedAction, CommandParseError> 
         "new" | "n" => parse_single_arg(command, parts).map(|name| RequestedAction::New {
             name,
             dir: None,
-            opencode_args: Vec::new(),
+            launch_args: Vec::new(),
         }),
         "rm" | "delete" | "d" => {
             parse_single_arg(command, parts).map(|target| RequestedAction::Rm { target })

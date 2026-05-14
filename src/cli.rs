@@ -6,7 +6,7 @@ pub enum RequestedAction {
     New {
         name: String,
         dir: Option<PathBuf>,
-        opencode_args: Vec<String>,
+        launch_args: Vec<String>,
     },
     Alias {
         name: String,
@@ -64,13 +64,13 @@ impl Cli {
                 Some(Command::New {
                     name,
                     dir,
-                    opencode_args,
+                    launch_args,
                 }),
                 None,
             ) => RequestedAction::New {
                 name,
                 dir,
-                opencode_args,
+                launch_args,
             },
             (Some(Command::Alias { name, dir }), None) => RequestedAction::Alias { name, dir },
             (Some(Command::Unalias { name }), None) => RequestedAction::Unalias { name },
@@ -104,7 +104,7 @@ pub enum Command {
         name: String,
         dir: Option<PathBuf>,
         #[arg(last = true)]
-        opencode_args: Vec<String>,
+        launch_args: Vec<String>,
     },
     Alias {
         name: String,

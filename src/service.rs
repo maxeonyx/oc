@@ -76,25 +76,25 @@ impl SessionService {
         &self,
         name: String,
         dir: Option<PathBuf>,
-        opencode_args: Vec<String>,
+        launch_args: Vec<String>,
     ) -> Result<()> {
-        self.create_session_with_attach(name, dir, opencode_args, true)
+        self.create_session_with_attach(name, dir, launch_args, true)
     }
 
     pub fn create_session_headless(
         &self,
         name: String,
         dir: Option<PathBuf>,
-        opencode_args: Vec<String>,
+        launch_args: Vec<String>,
     ) -> Result<()> {
-        self.create_session_with_attach(name, dir, opencode_args, false)
+        self.create_session_with_attach(name, dir, launch_args, false)
     }
 
     fn create_session_with_attach(
         &self,
         name: String,
         dir: Option<PathBuf>,
-        opencode_args: Vec<String>,
+        launch_args: Vec<String>,
         attach: bool,
     ) -> Result<()> {
         let directory = resolve_new_directory(dir)?;
@@ -103,7 +103,7 @@ impl SessionService {
         let mut store = self.open_session_store()?;
         let saved_session = store.save_alias(alias).context("failed to save session")?;
 
-        self.activate_new_saved_session(&tmux, &mut store, saved_session, opencode_args, attach)
+        self.activate_new_saved_session(&tmux, &mut store, saved_session, launch_args, attach)
     }
 
     pub fn save_alias(&self, name: String, dir: Option<PathBuf>) -> Result<()> {
@@ -214,7 +214,7 @@ impl SessionService {
         tmux.restart_session(
             &launch.tmux_session_name,
             &launch.directory,
-            &launch.opencode_args,
+            &launch.launch_args,
         )
         .with_context(|| format!("failed to restart session '{}'", saved_session.name))?;
 
@@ -311,10 +311,10 @@ impl SessionService {
         tmux: &Tmux,
         store: &mut SessionStore,
         saved_session: SavedSession,
-        initial_opencode_args: Vec<String>,
+        initial_launch_args: Vec<String>,
         attach: bool,
     ) -> Result<()> {
-        let launch = SessionLaunch::for_new_session(tmux, &saved_session, initial_opencode_args);
+        let launch = SessionLaunch::for_new_session(tmux, &saved_session, initial_launch_args);
         let directory_compatibility_fallback_snapshot =
             self.prepare_directory_compatibility_fallback_snapshot(&saved_session)?;
 
@@ -379,7 +379,7 @@ impl SessionService {
             tmux.launch_opencode_session(
                 &launch.tmux_session_name,
                 &launch.directory,
-                &launch.opencode_args,
+                &launch.launch_args,
             )
             .with_context(|| format!("failed to launch session '{}'", launch.session_name))?;
 
@@ -745,20 +745,20 @@ struct SessionLaunch {
     session_name: String,
     tmux_session_name: String,
     directory: PathBuf,
-    opencode_args: Vec<String>,
+    launch_args: Vec<String>,
 }
 
 impl SessionLaunch {
     fn for_new_session(
         tmux: &Tmux,
         saved_session: &SavedSession,
-        opencode_args: Vec<String>,
+        launch_args: Vec<String>,
     ) -> Self {
         Self {
             session_name: saved_session.name.clone(),
             tmux_session_name: tmux.managed_session_name(&saved_session.name),
             directory: saved_session.directory.clone(),
-            opencode_args,
+            launch_args,
         }
     }
 
@@ -767,7 +767,7 @@ impl SessionLaunch {
             session_name: saved_session.name.clone(),
             tmux_session_name: tmux.managed_session_name(&saved_session.name),
             directory: saved_session.directory.clone(),
-            opencode_args: launch_opencode_args(saved_session),
+            launch_args: saved_session_launch_args(saved_session),
         }
     }
 }
@@ -796,7 +796,7 @@ fn parse_legacy_alias_line(line: &str) -> Result<NewSessionAlias> {
         .next()
         .ok_or_else(|| anyhow::anyhow!("Legacy alias line must contain a tab separator: {line}"))?;
     let raw_args = fields.next().unwrap_or("");
-    let opencode_session_id = parse_legacy_opencode_args(raw_args);
+    let opencode_session_id = parse_legacy_session_id(raw_args);
 
     NewSessionAlias::new(
         String::from(name),
@@ -805,7 +805,7 @@ fn parse_legacy_alias_line(line: &str) -> Result<NewSessionAlias> {
     .map(|alias| alias.with_opencode_session_id(opencode_session_id))
 }
 
-fn parse_legacy_opencode_args(raw_args: &str) -> Option<String> {
+fn parse_legacy_session_id(raw_args: &str) -> Option<String> {
     let parts = raw_args
         .split_whitespace()
         .map(String::from)
@@ -824,7 +824,7 @@ fn parse_legacy_opencode_args(raw_args: &str) -> Option<String> {
     None
 }
 
-fn launch_opencode_args(saved_session: &SavedSession) -> Vec<String> {
+fn saved_session_launch_args(saved_session: &SavedSession) -> Vec<String> {
     saved_session
         .opencode_session_id
         .as_ref()

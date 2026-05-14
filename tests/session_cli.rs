@@ -710,7 +710,12 @@ fn restart_uses_captured_session_id() {
     let fake_opencode = env.install_fake_opencode();
     let session_name = managed_tmux_session_name(&env, "dc");
 
-    run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "dc"]);
+    run_new_command_and_wait(
+        &env,
+        &fake_opencode,
+        &session_name,
+        &["new", "dc", "--", "--agent", "arrange", "--prompt", "hello"],
+    );
     wait_for_file_to_have_non_empty_contents(
         &fake_opencode.session_id_log_path(),
         Duration::from_secs(5),

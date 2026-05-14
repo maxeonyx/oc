@@ -87,11 +87,11 @@ fn expand_tilde_directories(connection: &Connection) -> Result<()> {
 fn drop_opencode_args_column(connection: &Connection) -> Result<()> {
     let columns = connection
         .prepare("PRAGMA table_info(sessions)")
-        .context("failed to prepare sessions schema inspection query for opencode args removal")?
+        .context("failed to prepare sessions schema inspection query for launch-arg cleanup")?
         .query_map([], |row| row.get::<_, String>(1))
-        .context("failed to inspect sessions schema columns for opencode args removal")?
+        .context("failed to inspect sessions schema columns for launch-arg cleanup")?
         .collect::<rusqlite::Result<Vec<_>>>()
-        .context("failed to decode sessions schema columns for opencode args removal")?;
+        .context("failed to decode sessions schema columns for launch-arg cleanup")?;
 
     if !columns.iter().any(|column| column == "opencode_args") {
         return Ok(());
@@ -116,7 +116,7 @@ fn drop_opencode_args_column(connection: &Connection) -> Result<()> {
             COMMIT;
             ",
         )
-        .context("failed to migrate sessions table to drop opencode_args column")?;
+        .context("failed to rebuild sessions table without persisted launch args")?;
 
     Ok(())
 }
