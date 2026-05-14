@@ -11,7 +11,6 @@ pub enum RequestedAction {
     Alias {
         name: String,
         dir: Option<PathBuf>,
-        opencode_args: Vec<String>,
     },
     Unalias {
         name: String,
@@ -73,18 +72,7 @@ impl Cli {
                 dir,
                 opencode_args,
             },
-            (
-                Some(Command::Alias {
-                    name,
-                    dir,
-                    opencode_args,
-                }),
-                None,
-            ) => RequestedAction::Alias {
-                name,
-                dir,
-                opencode_args,
-            },
+            (Some(Command::Alias { name, dir }), None) => RequestedAction::Alias { name, dir },
             (Some(Command::Unalias { name }), None) => RequestedAction::Unalias { name },
             (Some(Command::Rm { target }), None) => RequestedAction::Rm { target },
             (Some(Command::Stop { target }), None) => RequestedAction::Stop { target },
@@ -121,8 +109,6 @@ pub enum Command {
     Alias {
         name: String,
         dir: Option<PathBuf>,
-        #[arg(last = true)]
-        opencode_args: Vec<String>,
     },
     Unalias {
         name: String,

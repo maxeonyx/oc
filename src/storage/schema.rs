@@ -9,7 +9,6 @@ const SCHEMA_SQL: &str = "
         name TEXT NOT NULL UNIQUE,
         directory TEXT NOT NULL,
         opencode_session_id TEXT,
-        opencode_args TEXT NOT NULL,
         last_used_at INTEGER NOT NULL DEFAULT 0
     ) STRICT;
 ";
@@ -20,6 +19,7 @@ pub fn ensure(connection: &Connection) -> Result<()> {
         .context("failed to initialize session database schema")?;
 
     ensure_last_used_at_column(connection)?;
+    drop_opencode_args_column(connection)?;
     expand_tilde_directories(connection)
 }
 
@@ -80,6 +80,43 @@ fn expand_tilde_directories(connection: &Connection) -> Result<()> {
             )
             .with_context(|| format!("failed to migrate directory for session row {id}"))?;
     }
+
+    Ok(())
+}
+
+fn drop_opencode_args_column(connection: &Connection) -> Result<()> {
+    let columns = connection
+        .prepare("PRAGMA table_info(sessions)")
+        .context("failed to prepare sessions schema inspection query for opencode args removal")?
+        .query_map([], |row| row.get::<_, String>(1))
+        .context("failed to inspect sessions schema columns for opencode args removal")?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to decode sessions schema columns for opencode args removal")?;
+
+    if !columns.iter().any(|column| column == "opencode_args") {
+        return Ok(());
+    }
+
+    connection
+        .execute_batch(
+            "
+            BEGIN;
+            ALTER TABLE sessions RENAME TO sessions_old;
+            CREATE TABLE sessions (
+                id INTEGER PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL UNIQUE,
+                directory TEXT NOT NULL,
+                opencode_session_id TEXT,
+                last_used_at INTEGER NOT NULL DEFAULT 0
+            ) STRICT;
+            INSERT INTO sessions (id, name, directory, opencode_session_id, last_used_at)
+            SELECT id, name, directory, opencode_session_id, COALESCE(last_used_at, 0)
+            FROM sessions_old;
+            DROP TABLE sessions_old;
+            COMMIT;
+            ",
+        )
+        .context("failed to migrate sessions table to drop opencode_args column")?;
 
     Ok(())
 }

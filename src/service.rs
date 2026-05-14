@@ -98,22 +98,17 @@ impl SessionService {
         attach: bool,
     ) -> Result<()> {
         let directory = resolve_new_directory(dir)?;
-        let alias = NewSessionAlias::new(name, directory, opencode_args)?;
+        let alias = NewSessionAlias::new(name, directory)?;
         let tmux = self.open_tmux();
         let mut store = self.open_session_store()?;
         let saved_session = store.save_alias(alias).context("failed to save session")?;
 
-        self.activate_new_saved_session(&tmux, &mut store, saved_session, attach)
+        self.activate_new_saved_session(&tmux, &mut store, saved_session, opencode_args, attach)
     }
 
-    pub fn save_alias(
-        &self,
-        name: String,
-        dir: Option<PathBuf>,
-        opencode_args: Vec<String>,
-    ) -> Result<()> {
+    pub fn save_alias(&self, name: String, dir: Option<PathBuf>) -> Result<()> {
         let directory = resolve_alias_directory(dir)?;
-        let alias = NewSessionAlias::new(name, directory, opencode_args)?;
+        let alias = NewSessionAlias::new(name, directory)?;
         let mut store = self.open_session_store()?;
 
         store.save_alias(alias).context("failed to save session")?;
@@ -316,9 +311,10 @@ impl SessionService {
         tmux: &Tmux,
         store: &mut SessionStore,
         saved_session: SavedSession,
+        initial_opencode_args: Vec<String>,
         attach: bool,
     ) -> Result<()> {
-        let launch = SessionLaunch::for_saved_session(tmux, &saved_session);
+        let launch = SessionLaunch::for_new_session(tmux, &saved_session, initial_opencode_args);
         let directory_compatibility_fallback_snapshot =
             self.prepare_directory_compatibility_fallback_snapshot(&saved_session)?;
 
@@ -753,6 +749,19 @@ struct SessionLaunch {
 }
 
 impl SessionLaunch {
+    fn for_new_session(
+        tmux: &Tmux,
+        saved_session: &SavedSession,
+        opencode_args: Vec<String>,
+    ) -> Self {
+        Self {
+            session_name: saved_session.name.clone(),
+            tmux_session_name: tmux.managed_session_name(&saved_session.name),
+            directory: saved_session.directory.clone(),
+            opencode_args,
+        }
+    }
+
     fn for_saved_session(tmux: &Tmux, saved_session: &SavedSession) -> Self {
         Self {
             session_name: saved_session.name.clone(),
@@ -787,48 +796,40 @@ fn parse_legacy_alias_line(line: &str) -> Result<NewSessionAlias> {
         .next()
         .ok_or_else(|| anyhow::anyhow!("Legacy alias line must contain a tab separator: {line}"))?;
     let raw_args = fields.next().unwrap_or("");
-    let (opencode_session_id, opencode_args) = parse_legacy_opencode_args(raw_args);
+    let opencode_session_id = parse_legacy_opencode_args(raw_args);
 
     NewSessionAlias::new(
         String::from(name),
         normalize_directory_for_storage(Path::new(directory))?,
-        opencode_args,
     )
     .map(|alias| alias.with_opencode_session_id(opencode_session_id))
 }
 
-fn parse_legacy_opencode_args(raw_args: &str) -> (Option<String>, Vec<String>) {
+fn parse_legacy_opencode_args(raw_args: &str) -> Option<String> {
     let parts = raw_args
         .split_whitespace()
         .map(String::from)
         .collect::<Vec<_>>();
-    let mut opencode_session_id = None;
-    let mut filtered_args = Vec::with_capacity(parts.len());
     let mut index = 0;
 
     while index < parts.len() {
         if parts[index] == "--session" {
             if let Some(session_id) = parts.get(index + 1) {
-                opencode_session_id = Some(session_id.clone());
-                index += 2;
-                continue;
+                return Some(session_id.clone());
             }
         }
-
-        filtered_args.push(parts[index].clone());
         index += 1;
     }
 
-    (opencode_session_id, filtered_args)
+    None
 }
 
 fn launch_opencode_args(saved_session: &SavedSession) -> Vec<String> {
-    let mut args = saved_session.opencode_args.clone();
-    if let Some(session_id) = &saved_session.opencode_session_id {
-        args.splice(0..0, [String::from("--session"), session_id.clone()]);
-    }
-
-    args
+    saved_session
+        .opencode_session_id
+        .as_ref()
+        .map(|session_id| vec![String::from("--session"), session_id.clone()])
+        .unwrap_or_default()
 }
 
 fn resolve_alias_directory(dir: Option<PathBuf>) -> Result<PathBuf> {

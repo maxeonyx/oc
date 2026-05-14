@@ -162,7 +162,7 @@ fn command_parser_supports_dashboard_commands() {
         RequestedAction::New {
             name: String::from("dc"),
             dir: None,
-            opencode_args: Vec::new()
+            opencode_args: Vec::new(),
         }
     );
     assert_eq!(
@@ -418,7 +418,6 @@ fn directory_abbreviation_handles_root_parent_without_double_slash() {
         name: String::from("tmp"),
         directory: PathBuf::from("/tmp"),
         opencode_session_id: None,
-        opencode_args: Vec::new(),
         last_used_at: 0,
     };
 
@@ -554,7 +553,6 @@ fn session_entry(
             name: String::from(name),
             directory: PathBuf::from(directory),
             opencode_session_id: opencode_session_id.map(String::from),
-            opencode_args: Vec::new(),
             last_used_at: 0,
         },
         status,

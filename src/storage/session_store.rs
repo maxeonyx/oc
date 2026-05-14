@@ -48,7 +48,6 @@ impl SessionStore {
             name: alias.name,
             directory: alias.directory,
             opencode_session_id: alias.opencode_session_id,
-            opencode_args: alias.opencode_args,
             last_used_at: 0,
         })
     }
@@ -96,7 +95,6 @@ impl SessionStore {
         if let Ok(existing) = self.find_by_name(&alias.name) {
             if existing.directory == alias.directory
                 && existing.opencode_session_id == alias.opencode_session_id
-                && existing.opencode_args == alias.opencode_args
             {
                 return Ok(None);
             }
@@ -113,7 +111,7 @@ impl SessionStore {
     pub fn list_saved_sessions(&self) -> Result<Vec<SavedSession>> {
         let mut statement = self.prepare_saved_session_query(
             "
-            SELECT id, name, directory, opencode_session_id, opencode_args, last_used_at
+            SELECT id, name, directory, opencode_session_id, last_used_at
             FROM sessions
             ORDER BY id
             ",
@@ -173,7 +171,7 @@ impl SessionStore {
     fn find_by_id(&self, id: i64) -> Result<SavedSession> {
         self.find_saved_session(
             "
-            SELECT id, name, directory, opencode_session_id, opencode_args, last_used_at
+            SELECT id, name, directory, opencode_session_id, last_used_at
             FROM sessions
             WHERE id = ?1
             ",
@@ -186,7 +184,7 @@ impl SessionStore {
     fn find_by_name(&self, name: &str) -> Result<SavedSession> {
         self.find_saved_session(
             "
-            SELECT id, name, directory, opencode_session_id, opencode_args, last_used_at
+            SELECT id, name, directory, opencode_session_id, last_used_at
             FROM sessions
             WHERE name = ?1
             ",
@@ -263,35 +261,17 @@ fn next_session_id(transaction: &Transaction<'_>) -> Result<i64> {
         .context("failed to allocate next dense session ID")
 }
 
-fn serialize_opencode_args(opencode_args: &[String]) -> Result<String> {
-    serde_json::to_string(opencode_args).context("failed to serialize OpenCode args")
-}
-
-fn deserialize_opencode_args(opencode_args_json: String) -> Result<Vec<String>> {
-    serde_json::from_str(&opencode_args_json).with_context(|| {
-        format!("failed to deserialize OpenCode args from stored JSON: {opencode_args_json}")
-    })
-}
-
 fn insert_alias_row(transaction: &Transaction<'_>, id: i64, alias: &NewSessionAlias) -> Result<()> {
     let directory = normalize_directory_for_storage(&alias.directory)?
         .display()
         .to_string();
-    let serialized_opencode_args = serialize_opencode_args(&alias.opencode_args)?;
 
     match transaction.execute(
         "
-        INSERT INTO sessions (id, name, directory, opencode_session_id, opencode_args, last_used_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        INSERT INTO sessions (id, name, directory, opencode_session_id, last_used_at)
+        VALUES (?1, ?2, ?3, ?4, ?5)
         ",
-        params![
-            id,
-            alias.name,
-            directory,
-            alias.opencode_session_id,
-            serialized_opencode_args,
-            0
-        ],
+        params![id, alias.name, directory, alias.opencode_session_id, 0],
     ) {
         Ok(_) => Ok(()),
         Err(error) => Err(map_insert_error(transaction, &alias.name, error)),
@@ -337,22 +317,12 @@ fn alias_name_exists(transaction: &Transaction<'_>, name: &str) -> Result<bool> 
 }
 
 fn map_saved_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SavedSession> {
-    let opencode_args_json = row.get::<_, String>(4)?;
-    let opencode_args = deserialize_opencode_args(opencode_args_json).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(
-            4,
-            rusqlite::types::Type::Text,
-            Box::new(std::io::Error::other(error.to_string())),
-        )
-    })?;
-
     Ok(SavedSession {
         id: row.get(0)?,
         name: row.get(1)?,
         directory: Path::new(&row.get::<_, String>(2)?).to_path_buf(),
         opencode_session_id: row.get(3)?,
-        opencode_args,
-        last_used_at: row.get(5)?,
+        last_used_at: row.get(4)?,
     })
 }
 

@@ -14,8 +14,6 @@ use std::fs;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-const EMPTY_ARGS_JSON: &str = "[]";
-
 fn managed_tmux_session_name(env: &TestEnv, name: &str) -> String {
     format!("{}{}", env.tmux_prefix(), name)
 }
@@ -43,14 +41,12 @@ fn saved_session_row_with_id(
     name: &str,
     directory: &std::path::Path,
     opencode_session_id: &str,
-    opencode_args: &str,
 ) -> SavedSessionRow {
     SavedSessionRow {
         id,
         name: String::from(name),
         directory: directory.to_path_buf(),
         opencode_session_id: Some(String::from(opencode_session_id)),
-        opencode_args: String::from(opencode_args),
         last_used_at: 0,
     }
 }
@@ -218,7 +214,6 @@ fn new_creates_alias_launches_tmux_session_and_attaches() {
             "worktree",
             env.root_dir(),
             &captured_id,
-            EMPTY_ARGS_JSON,
         )],
     );
     assert!(
@@ -248,7 +243,6 @@ fn new_without_tty_creates_alias_and_tmux_session_without_attaching() {
     assert_eq!(saved_sessions.len(), 1);
     assert_eq!(saved_sessions[0].name, "headless");
     assert_eq!(saved_sessions[0].directory, env.root_dir());
-    assert_eq!(saved_sessions[0].opencode_args, EMPTY_ARGS_JSON);
     assert_eq!(tmux_session_attached_count(&session_name), 0);
 }
 
@@ -288,7 +282,7 @@ fn new_without_tty_returns_promptly_when_session_id_is_delayed() {
 
 #[test]
 fn new_uses_explicit_dir_and_args_when_launching_tmux_session() {
-    let env = TestEnv::new("new-explicit-dir-and-args");
+    let env = TestEnv::new("new-explicit-dir-first-launch-args");
     let fake_opencode = env.install_fake_opencode();
     let project_dir = env.root_dir().join("project");
     fs::create_dir_all(&project_dir).expect("test should create explicit project directory");
@@ -320,7 +314,6 @@ fn new_uses_explicit_dir_and_args_when_launching_tmux_session() {
             "dc",
             &project_dir,
             &captured_id,
-            "[\"--model\",\"gpt-5.4\"]",
         )],
     );
     assert_eq!(
@@ -374,7 +367,6 @@ fn new_rejects_duplicate_name_without_creating_second_tmux_session() {
             "dc",
             env.root_dir(),
             &captured_id,
-            EMPTY_ARGS_JSON,
         )],
     );
     assert_eq!(env.list_tmux_sessions(), vec![session_name]);
@@ -414,7 +406,6 @@ fn rm_removes_alias_and_kills_running_tmux_session_by_numeric_id() {
             "two",
             env.root_dir(),
             &second_captured_id,
-            EMPTY_ARGS_JSON,
         )],
     );
     assert_eq!(env.list_tmux_sessions(), vec![session_two]);
@@ -464,7 +455,6 @@ fn stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias() {
             "dc",
             env.root_dir(),
             &captured_id,
-            EMPTY_ARGS_JSON,
         )],
     );
     let stopped_last_used = read_saved_sessions(env.aliases_file())
@@ -496,7 +486,6 @@ fn stop_accepts_numeric_id() {
             "dc",
             env.root_dir(),
             &captured_id,
-            EMPTY_ARGS_JSON,
         )],
     );
     let stopped_last_used = read_saved_sessions(env.aliases_file())
@@ -539,7 +528,6 @@ fn launch_detach_captures_session_id() {
             name: String::from("dc"),
             directory: env.root_dir().to_path_buf(),
             opencode_session_id: Some(captured_id.clone()),
-            opencode_args: String::from(EMPTY_ARGS_JSON),
             last_used_at: 0,
         }],
     );
@@ -785,7 +773,6 @@ fn launch_detach_captures_session_id_by_pid_when_session_table_is_unavailable() 
             name: String::from("dc"),
             directory: env.root_dir().to_path_buf(),
             opencode_session_id: Some(captured_id.clone()),
-            opencode_args: String::from(EMPTY_ARGS_JSON),
             last_used_at: 0,
         }],
     );
@@ -849,7 +836,6 @@ fn launch_detach_falls_back_to_directory_diff_when_process_session_table_is_miss
             name: String::from("dc"),
             directory: env.root_dir().to_path_buf(),
             opencode_session_id: Some(captured_id.clone()),
-            opencode_args: String::from(EMPTY_ARGS_JSON),
             last_used_at: 0,
         }],
     );

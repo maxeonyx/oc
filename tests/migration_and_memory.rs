@@ -63,17 +63,14 @@ fn migrate_preserves_legacy_directory_and_session_fields() {
     assert_eq!(saved[0].name, "two");
     assert_eq!(saved[0].directory, PathBuf::from("/tmp/two"));
     assert_eq!(saved[0].opencode_session_id, None);
-    assert_eq!(saved[0].opencode_args, "[]");
 
     assert_eq!(saved[1].name, "three");
     assert_eq!(saved[1].directory, PathBuf::from("/tmp/three"));
     assert_eq!(saved[1].opencode_session_id.as_deref(), Some("ses_123"));
-    assert_eq!(saved[1].opencode_args, r#"["extra","--flag"]"#);
 
     assert_eq!(saved[2].name, "trailing");
     assert_eq!(saved[2].directory, PathBuf::from("/tmp/trailing"));
     assert_eq!(saved[2].opencode_session_id, None);
-    assert_eq!(saved[2].opencode_args, "[]");
 }
 
 #[test]
@@ -116,7 +113,6 @@ fn opening_existing_db_migrates_tilde_directories_to_absolute_paths() {
                 name: String::from("meta"),
                 directory: PathBuf::from("~"),
                 opencode_session_id: None,
-                opencode_args: String::from("[]"),
                 last_used_at: 0,
             },
             common::SavedSessionRow {
@@ -124,7 +120,6 @@ fn opening_existing_db_migrates_tilde_directories_to_absolute_paths() {
                 name: String::from("dc"),
                 directory: PathBuf::from("~/project"),
                 opencode_session_id: None,
-                opencode_args: String::from("[]"),
                 last_used_at: 0,
             },
         ],

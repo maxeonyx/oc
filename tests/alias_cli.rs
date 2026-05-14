@@ -4,8 +4,6 @@ use common::{SavedSessionRow, TestEnv, read_saved_sessions, saved_session_row};
 use predicates::prelude::*;
 use std::fs;
 
-const EMPTY_ARGS_JSON: &str = "[]";
-
 fn alias_in_root_dir(env: &TestEnv, name: &str) {
     env.oc_cmd()
         .current_dir(env.root_dir())
@@ -34,20 +32,12 @@ fn alias_creates_db_and_inserts_session_with_default_dir() {
         env.aliases_file().display()
     );
 
-    assert_saved_sessions(
-        &env,
-        vec![saved_session_row(
-            1,
-            "worktree",
-            env.root_dir(),
-            EMPTY_ARGS_JSON,
-        )],
-    );
+    assert_saved_sessions(&env, vec![saved_session_row(1, "worktree", env.root_dir())]);
 }
 
 #[test]
 fn alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash() {
-    let env = TestEnv::new("alias-explicit-dir-and-args");
+    let env = TestEnv::new("alias-explicit-dir");
     let project_dir = env.root_dir().join("project");
     fs::create_dir_all(&project_dir).expect("test should create explicit project directory");
 
@@ -58,24 +48,11 @@ fn alias_uses_explicit_dir_and_captures_opencode_args_after_double_dash() {
             project_dir
                 .to_str()
                 .expect("project dir should be valid UTF-8 for test"),
-            "--",
-            "--model",
-            "gpt-5.4",
-            "--sandbox",
-            "read-only",
         ])
         .assert()
         .success();
 
-    assert_saved_sessions(
-        &env,
-        vec![saved_session_row(
-            1,
-            "dc",
-            &project_dir,
-            "[\"--model\",\"gpt-5.4\",\"--sandbox\",\"read-only\"]",
-        )],
-    );
+    assert_saved_sessions(&env, vec![saved_session_row(1, "dc", &project_dir)]);
 }
 
 #[test]
@@ -91,10 +68,7 @@ fn alias_expands_tilde_directory_before_storing() {
         .assert()
         .success();
 
-    assert_saved_sessions(
-        &env,
-        vec![saved_session_row(1, "dc", &project_dir, EMPTY_ARGS_JSON)],
-    );
+    assert_saved_sessions(&env, vec![saved_session_row(1, "dc", &project_dir)]);
 }
 
 #[test]
@@ -121,10 +95,7 @@ fn alias_rejects_duplicate_name() {
         .failure()
         .stderr(predicate::str::contains("already exists"));
 
-    assert_saved_sessions(
-        &env,
-        vec![saved_session_row(1, "dc", env.root_dir(), EMPTY_ARGS_JSON)],
-    );
+    assert_saved_sessions(&env, vec![saved_session_row(1, "dc", env.root_dir())]);
 }
 
 #[test]
@@ -140,9 +111,9 @@ fn alias_assigns_dense_gap_filling_ids() {
     assert_saved_sessions(
         &env,
         vec![
-            saved_session_row(1, "one", env.root_dir(), EMPTY_ARGS_JSON),
-            saved_session_row(2, "four", env.root_dir(), EMPTY_ARGS_JSON),
-            saved_session_row(3, "three", env.root_dir(), EMPTY_ARGS_JSON),
+            saved_session_row(1, "one", env.root_dir()),
+            saved_session_row(2, "four", env.root_dir()),
+            saved_session_row(3, "three", env.root_dir()),
         ],
     );
 }

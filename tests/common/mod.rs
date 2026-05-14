@@ -686,7 +686,6 @@ pub struct SavedSessionRow {
     pub name: String,
     pub directory: PathBuf,
     pub opencode_session_id: Option<String>,
-    pub opencode_args: String,
     pub last_used_at: i64,
 }
 
@@ -1119,7 +1118,7 @@ pub fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
     let mut statement = connection
         .prepare(&format!(
             "
-            SELECT id, name, directory, opencode_session_id, opencode_args, {select_last_used_at}
+            SELECT id, name, directory, opencode_session_id, {select_last_used_at}
             FROM sessions
             ORDER BY id
             "
@@ -1133,8 +1132,7 @@ pub fn read_saved_sessions(db_path: &Path) -> Vec<SavedSessionRow> {
                 name: row.get(1)?,
                 directory: PathBuf::from(row.get::<_, String>(2)?),
                 opencode_session_id: row.get(3)?,
-                opencode_args: row.get(4)?,
-                last_used_at: row.get(5)?,
+                last_used_at: row.get(4)?,
             })
         })
         .expect("session rows should be readable")
@@ -1470,7 +1468,7 @@ pub fn create_legacy_sessions_db(db_path: &Path, rows: &[SavedSessionRow]) {
                     row.name,
                     row.directory.display().to_string(),
                     row.opencode_session_id,
-                    row.opencode_args,
+                    "[]",
                 ],
             )
             .unwrap_or_else(|error| {
@@ -1512,18 +1510,12 @@ pub fn update_opencode_process_session_start_ticks(
     );
 }
 
-pub fn saved_session_row(
-    id: i64,
-    name: &str,
-    directory: &Path,
-    opencode_args: &str,
-) -> SavedSessionRow {
+pub fn saved_session_row(id: i64, name: &str, directory: &Path) -> SavedSessionRow {
     SavedSessionRow {
         id,
         name: String::from(name),
         directory: directory.to_path_buf(),
         opencode_session_id: None,
-        opencode_args: String::from(opencode_args),
         last_used_at: 0,
     }
 }

@@ -17,8 +17,6 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
-const EMPTY_ARGS_JSON: &str = "[]";
-
 fn managed_tmux_session_name(env: &TestEnv, name: &str) -> String {
     format!("{}{}", env.tmux_prefix(), name)
 }
@@ -316,7 +314,6 @@ fn bare_target_launches_saved_alias_by_name_when_tmux_session_is_missing() {
             name: String::from("dc"),
             directory: env.root_dir().to_path_buf(),
             opencode_session_id: Some(captured_id),
-            opencode_args: String::from(EMPTY_ARGS_JSON),
             last_used_at: 0,
         }],
     );
@@ -578,7 +575,6 @@ fn new_session_falls_back_to_dashboard_when_attach_fails() {
     assert_eq!(saved_sessions[0].id, 1);
     assert_eq!(saved_sessions[0].name, "dc");
     assert_eq!(saved_sessions[0].directory, env.root_dir());
-    assert_eq!(saved_sessions[0].opencode_args, EMPTY_ARGS_JSON);
 }
 
 fn assert_hidden_session_dump_status(env: &TestEnv, expected_status: &str) {
@@ -875,7 +871,6 @@ fn existing_db_gains_last_used_at_column_defaulting_to_zero() {
             name: String::from("legacy"),
             directory: env.root_dir().to_path_buf(),
             opencode_session_id: None,
-            opencode_args: String::from(EMPTY_ARGS_JSON),
             last_used_at: 999,
         }],
     );
@@ -986,7 +981,6 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
                 name: String::from("dc"),
                 directory: env.root_dir().to_path_buf(),
                 opencode_session_id: Some(String::from("ses_single_match")),
-                opencode_args: String::from(EMPTY_ARGS_JSON),
                 last_used_at: 0,
             },
             SavedSessionRow {
@@ -994,7 +988,6 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
                 name: String::from("keep"),
                 directory: keep_dir,
                 opencode_session_id: Some(String::from("ses_existing")),
-                opencode_args: String::from(EMPTY_ARGS_JSON),
                 last_used_at: 0,
             },
             SavedSessionRow {
@@ -1002,7 +995,6 @@ fn session_list_catchup_fills_null_id_when_opencode_db_has_exactly_one_root_matc
                 name: String::from("amb"),
                 directory: ambiguous_dir,
                 opencode_session_id: None,
-                opencode_args: String::from(EMPTY_ARGS_JSON),
                 last_used_at: 0,
             },
         ]
@@ -1035,7 +1027,6 @@ fn session_list_catchup_fills_idle_alias_when_process_session_table_exists_and_d
             name: String::from("dc"),
             directory: env.root_dir().to_path_buf(),
             opencode_session_id: Some(String::from("ses_idle_single_match")),
-            opencode_args: String::from(EMPTY_ARGS_JSON),
             last_used_at: 0,
         }]
     );
@@ -1072,7 +1063,6 @@ fn session_list_catchup_matches_tilde_alias_directory_against_expanded_home_path
             name: String::from("dc"),
             directory: project_dir,
             opencode_session_id: Some(String::from("ses_tilde_match")),
-            opencode_args: String::from(EMPTY_ARGS_JSON),
             last_used_at: 0,
         }]
     );

@@ -78,9 +78,11 @@ pub fn interactive_attach_failure_status(
 }
 
 fn is_attach_failure(error: &anyhow::Error) -> bool {
-    error
-        .chain()
-        .any(|cause| cause.to_string().contains("failed to attach"))
+    error.chain().any(|cause| {
+        let message = cause.to_string();
+        message.contains("failed to attach")
+            || message.contains("tmux attach requires running oc from outside tmux")
+    })
 }
 
 pub fn run_requested_action(service: &SessionService, action: RequestedAction) -> Result<()> {
@@ -96,11 +98,7 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
                 service.create_session_headless(name, dir, opencode_args)
             }
         }
-        RequestedAction::Alias {
-            name,
-            dir,
-            opencode_args,
-        } => service.save_alias(name, dir, opencode_args),
+        RequestedAction::Alias { name, dir } => service.save_alias(name, dir),
         RequestedAction::Unalias { name } => service.remove_alias(&name),
         RequestedAction::Rm { target } => service.remove_session(&target),
         RequestedAction::Stop { target } => service.stop_session(&target),

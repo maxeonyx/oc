@@ -7,7 +7,6 @@ pub struct SavedSession {
     pub name: String,
     pub directory: PathBuf,
     pub opencode_session_id: Option<String>,
-    pub opencode_args: Vec<String>,
     pub last_used_at: i64,
 }
 
@@ -16,18 +15,16 @@ pub struct NewSessionAlias {
     pub name: String,
     pub directory: PathBuf,
     pub opencode_session_id: Option<String>,
-    pub opencode_args: Vec<String>,
 }
 
 impl NewSessionAlias {
-    pub fn new(name: String, directory: PathBuf, opencode_args: Vec<String>) -> Result<Self> {
+    pub fn new(name: String, directory: PathBuf) -> Result<Self> {
         validate_session_name(&name)?;
 
         Ok(Self {
             name,
             directory,
             opencode_session_id: None,
-            opencode_args,
         })
     }
 
