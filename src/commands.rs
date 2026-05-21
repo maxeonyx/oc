@@ -104,6 +104,9 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
         RequestedAction::Stop { target } => service.stop_session(&target),
         RequestedAction::Restart { target } => service.restart_session(&target),
         RequestedAction::Move { target, new_dir } => service.move_session(&target, new_dir),
+        RequestedAction::Completion { .. } => {
+            unreachable!("completion actions are handled before runtime setup")
+        }
         RequestedAction::Migrate => run_migrate(service),
         RequestedAction::List { json } => run_list(service, json),
         RequestedAction::DbPath => run_db_path(service),

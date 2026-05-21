@@ -1,8 +1,13 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{Generator, Shell};
+use std::io;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestedAction {
+    Completion {
+        shell: CompletionShell,
+    },
     New {
         name: String,
         dir: Option<PathBuf>,
@@ -57,9 +62,27 @@ pub struct Cli {
     pub target: Option<String>,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum CompletionShell {
+    Bash,
+    Fish,
+    Zsh,
+}
+
+impl From<CompletionShell> for Shell {
+    fn from(value: CompletionShell) -> Self {
+        match value {
+            CompletionShell::Bash => Shell::Bash,
+            CompletionShell::Fish => Shell::Fish,
+            CompletionShell::Zsh => Shell::Zsh,
+        }
+    }
+}
+
 impl Cli {
     pub fn requested_action(self) -> RequestedAction {
         match (self.command, self.target) {
+            (Some(Command::Completion { shell }), None) => RequestedAction::Completion { shell },
             (
                 Some(Command::New {
                     name,
@@ -97,8 +120,27 @@ impl Cli {
     }
 }
 
+pub fn print_completion(shell: CompletionShell) {
+    let mut command = Cli::command();
+    let bin_name = command.get_name().to_string();
+    let generator: Shell = shell.into();
+    generate(generator, &mut command, bin_name, &mut io::stdout());
+}
+
+fn generate(
+    generator: impl Generator,
+    command: &mut clap::Command,
+    bin_name: String,
+    output: &mut dyn io::Write,
+) {
+    clap_complete::generate(generator, command, bin_name, output);
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    Completion {
+        shell: CompletionShell,
+    },
     #[command(visible_alias = "n")]
     New {
         name: String,
