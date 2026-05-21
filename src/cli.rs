@@ -179,9 +179,7 @@ fn generate(
 #[derive(Debug, Subcommand)]
 pub enum Command {
     #[command(about = "Generate shell completion scripts")]
-    Completion {
-        shell: CompletionShell,
-    },
+    Completion { shell: CompletionShell },
     #[command(visible_alias = "n", about = "Create a new OpenCode session")]
     New {
         name: String,
@@ -190,31 +188,17 @@ pub enum Command {
         launch_args: Vec<String>,
     },
     #[command(about = "Create an alias for a directory")]
-    Alias {
-        name: String,
-        dir: Option<PathBuf>,
-    },
+    Alias { name: String, dir: Option<PathBuf> },
     #[command(about = "Remove a saved directory alias")]
-    Unalias {
-        name: String,
-    },
+    Unalias { name: String },
     #[command(name = "rm", visible_aliases = ["delete", "d"], about = "Remove a session from the database")]
-    Rm {
-        target: String,
-    },
+    Rm { target: String },
     #[command(about = "Stop a running session")]
-    Stop {
-        target: String,
-    },
+    Stop { target: String },
     #[command(about = "Restart a session")]
-    Restart {
-        target: String,
-    },
+    Restart { target: String },
     #[command(name = "mv", about = "Move a session to a new directory")]
-    Move {
-        target: String,
-        new_dir: PathBuf,
-    },
+    Move { target: String, new_dir: PathBuf },
     #[command(about = "Migrate legacy aliases into the database")]
     Migrate,
     #[command(about = "List tracked sessions")]
@@ -229,7 +213,5 @@ pub enum Command {
     #[command(name = "__dump-runtime-config", hide = true)]
     DumpRuntimeConfig,
     #[command(name = "__parse-memory-status", hide = true)]
-    ParseMemoryStatus {
-        path: PathBuf,
-    },
+    ParseMemoryStatus { path: PathBuf },
 }
