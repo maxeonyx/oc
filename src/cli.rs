@@ -1,4 +1,4 @@
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::{Generator, Shell};
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -59,6 +59,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
+    #[arg(value_hint = ValueHint::Other)]
     pub target: Option<String>,
 }
 
@@ -182,23 +183,47 @@ pub enum Command {
     Completion { shell: CompletionShell },
     #[command(visible_alias = "n", about = "Create a new OpenCode session")]
     New {
+        #[arg(value_hint = ValueHint::Other)]
         name: String,
+        #[arg(value_hint = ValueHint::DirPath)]
         dir: Option<PathBuf>,
         #[arg(last = true)]
         launch_args: Vec<String>,
     },
     #[command(about = "Create an alias for a directory")]
-    Alias { name: String, dir: Option<PathBuf> },
+    Alias {
+        #[arg(value_hint = ValueHint::Other)]
+        name: String,
+        #[arg(value_hint = ValueHint::DirPath)]
+        dir: Option<PathBuf>,
+    },
     #[command(about = "Remove a saved directory alias")]
-    Unalias { name: String },
+    Unalias {
+        #[arg(value_hint = ValueHint::Other)]
+        name: String,
+    },
     #[command(name = "rm", visible_aliases = ["delete", "d"], about = "Remove a session from the database")]
-    Rm { target: String },
+    Rm {
+        #[arg(value_hint = ValueHint::Other)]
+        target: String,
+    },
     #[command(about = "Stop a running session")]
-    Stop { target: String },
+    Stop {
+        #[arg(value_hint = ValueHint::Other)]
+        target: String,
+    },
     #[command(about = "Restart a session")]
-    Restart { target: String },
+    Restart {
+        #[arg(value_hint = ValueHint::Other)]
+        target: String,
+    },
     #[command(name = "mv", about = "Move a session to a new directory")]
-    Move { target: String, new_dir: PathBuf },
+    Move {
+        #[arg(value_hint = ValueHint::Other)]
+        target: String,
+        #[arg(value_hint = ValueHint::DirPath)]
+        new_dir: PathBuf,
+    },
     #[command(about = "Migrate legacy aliases into the database")]
     Migrate,
     #[command(about = "List tracked sessions")]
@@ -213,5 +238,8 @@ pub enum Command {
     #[command(name = "__dump-runtime-config", hide = true)]
     DumpRuntimeConfig,
     #[command(name = "__parse-memory-status", hide = true)]
-    ParseMemoryStatus { path: PathBuf },
+    ParseMemoryStatus {
+        #[arg(value_hint = ValueHint::FilePath)]
+        path: PathBuf,
+    },
 }
