@@ -1,6 +1,6 @@
 [package]
 name = "oc"
-version = "0.3.13"
+version = "0.3.14"
 edition = "2024"
 description = "Interactive TUI session manager for OpenCode"
 license = "MIT"
