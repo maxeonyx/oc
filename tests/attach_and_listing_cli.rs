@@ -927,6 +927,7 @@ fn create_attach_and_restart_refresh_last_used_at() {
         .and_then(|row| row.opencode_session_id)
         .expect("session should have a saved OpenCode session ID");
 
+    fake_opencode.reset_logs_for_launch();
     let mut restart_command = env.oc_cmd();
     fake_opencode.apply_to_assert_cmd(&mut restart_command);
     restart_command.args(["restart", "dc"]).assert().success();

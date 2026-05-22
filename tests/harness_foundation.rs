@@ -6,6 +6,7 @@ use common::{
 };
 use predicates::prelude::*;
 use std::fs;
+use std::sync::mpsc;
 use std::time::Duration;
 
 #[test]
@@ -68,15 +69,21 @@ fn test_env_drop_cleans_up_tmux_sessions() {
 fn wait_for_file_contains_observes_eventual_file_content() {
     let env = TestEnv::new("file-observability");
     let file_path = env.root_dir().join("eventual.txt");
+    let (ready_tx, ready_rx) = mpsc::channel();
 
     std::thread::spawn({
         let file_path = file_path.clone();
         move || {
-            std::thread::sleep(Duration::from_millis(200));
+            ready_rx
+                .recv()
+                .expect("writer thread should receive start signal");
             fs::write(&file_path, "ready\n").expect("writer thread should create eventual file");
         }
     });
 
+    ready_tx
+        .send(())
+        .expect("main thread should signal writer thread to proceed");
     let contents = wait_for_file_contains(&file_path, "ready", Duration::from_secs(5));
     assert!(contents.contains("ready"));
 }

@@ -723,6 +723,7 @@ fn restart_uses_captured_session_id() {
 
     let captured_id = read_captured_session_id(&fake_opencode);
 
+    fake_opencode.reset_logs_for_launch();
     let mut restart_command = env.oc_cmd();
     fake_opencode.apply_to_assert_cmd(&mut restart_command);
     restart_command.args(["restart", "dc"]).assert().success();
@@ -955,6 +956,7 @@ fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
         Some(captured_id.as_str())
     );
 
+    fake_opencode.reset_logs_for_launch();
     let mut restart_command = env.oc_cmd();
     fake_opencode.apply_to_assert_cmd(&mut restart_command);
     restart_command.args(["restart", "one"]).assert().success();
