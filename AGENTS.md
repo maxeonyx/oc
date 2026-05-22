@@ -37,6 +37,27 @@ TDD is enforced via `cargo ratchet` (the `tdd-ratchet` crate). CI runs `cargo ra
 
 Tests and fixture scripts create real tmux sessions. **Agents must verify no leaked tmux sessions remain after test runs or fixture use.** After running `cargo ratchet` or the test fixture script, check for leftover sessions with `tmux ls` and kill any that match the test/fixture prefix. The `TestEnv` harness handles cleanup for tests, but if a test crashes or an agent interrupts a run, sessions can leak.
 
+### E2E test reliability principles
+
+These rules make flaky tests structurally impossible. Follow them when writing or modifying tests.
+
+**Fresh evidence per launch:**
+- Every launch must produce uniquely attributable evidence. Never accept "file exists" as proof of a fresh launch — verify data tied to the current launch only.
+- If a shared log file is reused across launches, the test must wait for overwrite evidence (content change), not mere presence. Call `reset_logs_for_launch()` before triggering a re-launch.
+- Assertions must prove "this launch happened," not just "a launch happened sometime." Expected args, env, and token should all come from the current test action.
+
+**Synchronize on observable state, never time:**
+- No fixed sleeps in test logic. Use polling-based assertions everywhere.
+- Wait for explicit start conditions (e.g. fake process has written its log) before reading logs.
+- Wait for explicit stop conditions (e.g. tmux session gone, pane process exited) before asserting shutdown/restart behavior.
+- "Command returned" does not prove the managed process started, stopped, or restarted. Each step needs its own observable postcondition.
+
+**Isolation and cleanup:**
+- All tests must use `TestEnv` — no ad hoc paths or tmux names.
+- Tmux session names are unique per test and scoped by the harness prefix.
+- Cleanup happens before and after each test. A leaked tmux session matching the test prefix is a test failure.
+- Tests must be order-independent. All required state is created within the test's own isolated environment.
+
 ## CI & release
 
 Single `.github/workflows/ci.yml` with 4 chained jobs: Check → Build → Release + Pages. Auto-releases on every push to main (no manual tagging). **Every push that changes `src/` or `Cargo.toml` must bump the version in `Cargo.toml`** — CI enforces this and blocks the pipeline otherwise.
