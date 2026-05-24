@@ -46,21 +46,21 @@ pub fn compute_layout(
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(panel_height(input_content_height)),
             Constraint::Length(panel_height(SUMMARY_CONTENT_HEIGHT)),
             Constraint::Length(panel_height(list_content_height)),
             Constraint::Length(panel_height(ACTIONS_CONTENT_HEIGHT)),
             Constraint::Length(panel_height(HELP_CONTENT_HEIGHT)),
+            Constraint::Length(panel_height(input_content_height)),
         ])
         .split(container.content);
 
     DashboardLayout {
         container,
-        input: SurfaceLayout::new(sections[0], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
-        summary: SurfaceLayout::new(sections[1], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
-        list: SurfaceLayout::new(sections[2], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
-        actions: SurfaceLayout::new(sections[3], PANEL_EDGE_HEIGHT, ACTIONS_HORIZONTAL_PADDING),
-        help: SurfaceLayout::new(sections[4], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
+        summary: SurfaceLayout::new(sections[0], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
+        list: SurfaceLayout::new(sections[1], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
+        actions: SurfaceLayout::new(sections[2], PANEL_EDGE_HEIGHT, ACTIONS_HORIZONTAL_PADDING),
+        help: SurfaceLayout::new(sections[3], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
+        input: SurfaceLayout::new(sections[4], PANEL_EDGE_HEIGHT, PANEL_HORIZONTAL_PADDING),
     }
 }
 
