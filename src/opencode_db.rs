@@ -342,13 +342,58 @@ fn is_missing_session_table_error(error: &rusqlite::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn resolve_root_session_id_returns_root_for_nested_subagent_session() {
-        todo!("pending TDD ratchet commit for nested root session resolution");
+        let connection = Connection::open_in_memory().expect("in-memory sqlite should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE session (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    directory TEXT NOT NULL,
+                    parent_id TEXT,
+                    time_created INTEGER NOT NULL,
+                    time_updated INTEGER NOT NULL
+                );
+                INSERT INTO session (id, directory, parent_id, time_created, time_updated)
+                VALUES
+                    ('ses_root', '/tmp/project', NULL, 1, 1),
+                    ('ses_child', '/tmp/project', 'ses_root', 1, 1),
+                    ('ses_grandchild', '/tmp/project', 'ses_child', 1, 1);
+                ",
+            )
+            .expect("session schema should initialize");
+
+        let resolved =
+            resolve_root_session_id(&connection, Path::new("/tmp/opencode.db"), "ses_grandchild")
+                .expect("nested session should resolve to root");
+
+        assert_eq!(resolved, "ses_root");
     }
 
     #[test]
     fn resolve_root_session_id_preserves_unknown_session_id() {
-        todo!("pending TDD ratchet commit for unknown session id passthrough");
+        let connection = Connection::open_in_memory().expect("in-memory sqlite should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE session (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    directory TEXT NOT NULL,
+                    parent_id TEXT,
+                    time_created INTEGER NOT NULL,
+                    time_updated INTEGER NOT NULL
+                );
+                ",
+            )
+            .expect("session schema should initialize");
+
+        let resolved =
+            resolve_root_session_id(&connection, Path::new("/tmp/opencode.db"), "ses_missing")
+                .expect("unknown session should be preserved");
+
+        assert_eq!(resolved, "ses_missing");
     }
 }

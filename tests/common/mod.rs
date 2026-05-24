@@ -1346,6 +1346,10 @@ pub fn insert_opencode_session(
             "
             INSERT INTO session (id, directory, parent_id, time_created, time_updated)
             VALUES (?1, ?2, ?3, 1, 1)
+            ON CONFLICT(id) DO UPDATE SET
+                directory = excluded.directory,
+                parent_id = excluded.parent_id,
+                time_updated = excluded.time_updated
             ",
             params![id, directory.display().to_string(), parent_id],
         )

@@ -769,19 +769,21 @@ fn input_cursor_offset(state: &DashboardState) -> u16 {
 }
 
 fn should_show_cursor(input_mode: InputMode) -> bool {
-    matches!(input_mode, InputMode::Command) || matches!(input_mode, InputMode::Filter)
+    matches!(input_mode, InputMode::Command | InputMode::Filter)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn filter_mode_always_shows_cursor() {
-        todo!("pending TDD ratchet commit for filter cursor visibility");
+        assert!(should_show_cursor(InputMode::Filter));
     }
 
     #[test]
     fn command_mode_shows_cursor() {
-        todo!("pending TDD ratchet commit for command cursor visibility regression guard");
+        assert!(should_show_cursor(InputMode::Command));
     }
 }
 

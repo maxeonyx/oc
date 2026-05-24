@@ -2,7 +2,7 @@ mod common;
 
 use common::{
     FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session,
-    read_opencode_process_sessions, read_opencode_sessions, read_saved_sessions,
+    insert_opencode_session, read_opencode_process_sessions, read_opencode_sessions, read_saved_sessions,
     tmux_session_attached_count, update_saved_session_last_used_at, wait_for_file_contains,
     wait_for_file_exists, wait_for_file_to_contain_parseable_u32,
     wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session,
@@ -1018,7 +1018,65 @@ fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
 
 #[test]
 fn launch_captures_root_session_id_when_process_session_points_at_subagent() {
-    todo!("pending TDD ratchet commit for root session capture via process_session parent chain");
+    let env = TestEnv::new("launch-captures-root-session-id-from-subagent-process-row");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    fake_opencode.reset_logs_for_launch();
+    let mut command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut command);
+    let child = command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
+        .env("OC_FAKE_OPENCODE_LIFECYCLE_DELAY_MS", "1800")
+        .args(["new", "dc"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("oc new should spawn");
+
+    env.wait_for_tmux_session_exists(&session_name);
+    let pid = wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5));
+    let created_row = wait_for_opencode_process_session_state(
+        env.opencode_db(),
+        pid,
+        Duration::from_secs(5),
+        "to capture the initial session id",
+        |row| row.reason.as_deref() == Some("created") && row.session_id.is_some(),
+    );
+
+    let child_session_id = created_row
+        .session_id
+        .clone()
+        .expect("created row should include a child session id");
+    let root_session_id = format!("{child_session_id}-root");
+
+    insert_opencode_session(env.opencode_db(), &root_session_id, env.root_dir(), None);
+    insert_opencode_session(
+        env.opencode_db(),
+        &child_session_id,
+        env.root_dir(),
+        Some(&root_session_id),
+    );
+
+    allow_new_command_to_settle(&session_name);
+    let output = child
+        .wait_with_output()
+        .expect("oc new process should exit after attach handling completes");
+    assert!(
+        output.status.success(),
+        "Expected oc new to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let saved_rows = read_saved_sessions(env.aliases_file());
+    let saved_row = saved_rows
+        .iter()
+        .find(|row| row.name == "dc")
+        .expect("saved row should exist");
+
+    assert_eq!(saved_row.opencode_session_id.as_deref(), Some(root_session_id.as_str()));
 }
 
 #[test]
