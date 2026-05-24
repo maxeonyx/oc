@@ -8,6 +8,7 @@ use common::{
     wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session,
     wait_for_opencode_process_session_absent, wait_for_opencode_process_session_state,
     wait_for_tmux_pane_current_command_to_contain, wait_for_tmux_pane_pid_to_be_non_zero,
+    wait_for_tmux_session_attached, wait_for_tmux_session_client_ready_for_detach,
 };
 use predicates::prelude::*;
 use std::fs;
@@ -188,6 +189,15 @@ fn wait_for_command_to_exit_successfully(
         }
 
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn assert_child_still_running(child: &mut std::process::Child, description: &str) {
+    if let Some(status) = child
+        .try_wait()
+        .unwrap_or_else(|error| panic!("Failed to poll {description}: {error}"))
+    {
+        panic!("Expected {description} to still be running\nstatus: {status}");
     }
 }
 
@@ -732,6 +742,44 @@ fn restart_uses_captured_session_id() {
     assert_eq!(
         fs::read_to_string(fake_opencode.args_log_path()).expect("args log should be readable"),
         format!("--session\n{captured_id}\n")
+    );
+}
+
+#[test]
+fn restart_attaches_to_restarted_session() {
+    let env = TestEnv::new("restart-attaches-to-restarted-session");
+    let fake_opencode = env.install_fake_opencode();
+    let session_name = managed_tmux_session_name(&env, "dc");
+
+    run_new_command_and_wait(&env, &fake_opencode, &session_name, &["new", "dc"]);
+
+    fake_opencode.reset_logs_for_launch();
+    let mut restart_command = env.std_oc_cmd();
+    fake_opencode.apply_to_command(&mut restart_command);
+    let mut child = restart_command
+        .env("OC_FORCE_ATTACH_FOR_TESTS", "1")
+        .args(["restart", "dc"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("oc restart should spawn");
+
+    env.wait_for_tmux_session_exists(&session_name);
+    wait_for_tmux_pane_pid_to_be_non_zero(&session_name, Duration::from_secs(5));
+    wait_for_tmux_session_attached(&session_name, Duration::from_secs(5));
+    wait_for_tmux_session_client_ready_for_detach(&session_name, Duration::from_secs(5));
+    assert_child_still_running(&mut child, "oc restart process before detach");
+
+    detach_tmux_client_from_session(&session_name);
+    let output = child
+        .wait_with_output()
+        .expect("oc restart process should exit after detach");
+    assert!(
+        output.status.success(),
+        "Expected oc restart to exit successfully\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
