@@ -92,7 +92,7 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
             dir,
             launch_args,
         } => {
-            if should_attach_new_session() {
+            if should_attach_session() {
                 service.create_session(name, dir, launch_args)
             } else {
                 service.create_session_headless(name, dir, launch_args)
@@ -102,7 +102,14 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
         RequestedAction::Unalias { name } => service.remove_alias(&name),
         RequestedAction::Rm { target } => service.remove_session(&target),
         RequestedAction::Stop { target } => service.stop_session(&target),
-        RequestedAction::Restart { target } => service.restart_session(&target),
+        RequestedAction::Restart { target } => {
+            service.restart_session(&target)?;
+            if should_attach_session() {
+                service.activate_target(&target)
+            } else {
+                Ok(())
+            }
+        }
         RequestedAction::Move { target, new_dir } => service.move_session(&target, new_dir),
         RequestedAction::Completion { .. } => {
             unreachable!("completion actions are handled before runtime setup")
@@ -121,7 +128,7 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
     }
 }
 
-fn should_attach_new_session() -> bool {
+fn should_attach_session() -> bool {
     stdin().is_terminal() || env::var_os("OC_FORCE_ATTACH_FOR_TESTS").is_some()
 }
 
