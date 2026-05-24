@@ -1,8 +1,9 @@
 use anyhow::{Context, Result, anyhow, bail};
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{IsTerminal, stdin, stdout};
+use std::io::{self, IsTerminal, stdin, stdout};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -346,6 +347,7 @@ fn parse_managed_session_line(line: &str, prefix: &str) -> Option<ManagedSession
         attached_count: attached_count.parse().ok()?,
         pane_pid: None,
         memory_bytes: None,
+        tree_memory_bytes: None,
     })
 }
 
@@ -353,6 +355,11 @@ fn enrich_runtime(mut runtime: ManagedSessionRuntime) -> ManagedSessionRuntime {
     runtime.pane_pid = pane_pid(&runtime.tmux_session_name).ok().flatten();
     runtime.memory_bytes = runtime.pane_pid.and_then(|pid| {
         read_process_memory_bytes(Path::new(&format!("/proc/{pid}/status")))
+            .ok()
+            .flatten()
+    });
+    runtime.tree_memory_bytes = runtime.pane_pid.and_then(|pid| {
+        read_process_tree_memory_bytes(Path::new("/proc"), pid)
             .ok()
             .flatten()
     });
@@ -390,10 +397,98 @@ pub fn read_process_memory_bytes(status_path: &Path) -> Result<Option<u64>> {
     Ok(parse_memory_status(&status))
 }
 
+pub fn read_process_tree_memory_bytes(proc_root: &Path, root_pid: u32) -> Result<Option<u64>> {
+    let root_status_path = proc_root.join(root_pid.to_string()).join("status");
+    let Some(root_memory_bytes) = read_process_memory_bytes_if_exists(&root_status_path)? else {
+        return Ok(None);
+    };
+
+    let child_map = read_process_children(proc_root)?;
+    let mut total_bytes = root_memory_bytes;
+    let mut visited = HashSet::from([root_pid]);
+    let mut stack = child_map.get(&root_pid).cloned().unwrap_or_default();
+
+    while let Some(pid) = stack.pop() {
+        if !visited.insert(pid) {
+            continue;
+        }
+
+        if let Some(memory_bytes) =
+            read_process_memory_bytes_if_exists(&proc_root.join(pid.to_string()).join("status"))?
+        {
+            total_bytes += memory_bytes;
+        }
+
+        if let Some(children) = child_map.get(&pid) {
+            stack.extend(children.iter().copied());
+        }
+    }
+
+    Ok(Some(total_bytes))
+}
+
 pub fn parse_memory_status(status: &str) -> Option<u64> {
     let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
     let value = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
     Some(value * 1024)
+}
+
+fn read_process_memory_bytes_if_exists(status_path: &Path) -> Result<Option<u64>> {
+    match read_process_memory_bytes(status_path) {
+        Ok(memory_bytes) => Ok(memory_bytes),
+        Err(error) if is_not_found_error(&error) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn read_process_children(proc_root: &Path) -> Result<HashMap<u32, Vec<u32>>> {
+    let mut child_map = HashMap::<u32, Vec<u32>>::new();
+
+    for entry in fs::read_dir(proc_root)
+        .with_context(|| format!("failed to list proc directory {}", proc_root.display()))?
+    {
+        let entry = entry.with_context(|| {
+            format!("failed to read entry in proc directory {}", proc_root.display())
+        })?;
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|file_name| file_name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+
+        let stat_path = entry.path().join("stat");
+        let stat = match fs::read_to_string(&stat_path) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to read {}", stat_path.display()));
+            }
+        };
+
+        let Some(parent_pid) = parse_process_parent_pid(&stat) else {
+            continue;
+        };
+
+        child_map.entry(parent_pid).or_default().push(pid);
+    }
+
+    Ok(child_map)
+}
+
+fn parse_process_parent_pid(stat: &str) -> Option<u32> {
+    let (_, fields) = stat.rsplit_once(") ")?;
+    fields.split_whitespace().nth(1)?.parse::<u32>().ok()
+}
+
+fn is_not_found_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|io_error| io_error.kind() == io::ErrorKind::NotFound)
+    })
 }
 
 pub fn is_tmux_server_unavailable_error(stderr: &str) -> bool {

@@ -59,6 +59,7 @@ pub struct ManagedSessionRuntime {
     pub attached_count: usize,
     pub pane_pid: Option<u32>,
     pub memory_bytes: Option<u64>,
+    pub tree_memory_bytes: Option<u64>,
 }
 
 impl SessionStatus {
@@ -118,6 +119,12 @@ impl SessionListEntry {
         self.runtime
             .as_ref()
             .and_then(|runtime| runtime.memory_bytes)
+    }
+
+    pub fn runtime_tree_memory_bytes(&self) -> Option<u64> {
+        self.runtime
+            .as_ref()
+            .and_then(|runtime| runtime.tree_memory_bytes)
     }
 }
 

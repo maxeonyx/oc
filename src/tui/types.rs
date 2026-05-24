@@ -30,6 +30,7 @@ pub struct DashboardSummary {
     pub filtered_sessions: usize,
     pub filtered_running: usize,
     pub filtered_memory_bytes: u64,
+    pub filtered_tree_memory_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +41,7 @@ pub struct DashboardRow {
     pub full_directory: PathBuf,
     pub opencode_session_id: Option<String>,
     pub memory_bytes: Option<u64>,
+    pub tree_memory_bytes: Option<u64>,
     pub status: SessionStatus,
 }
 
@@ -79,6 +81,7 @@ impl DashboardSnapshot {
             filtered_sessions: 0,
             filtered_running: 0,
             filtered_memory_bytes: 0,
+            filtered_tree_memory_bytes: 0,
         };
 
         let rows = entries
@@ -101,6 +104,7 @@ impl DashboardSnapshot {
 impl DashboardRow {
     fn from_session_entry(entry: SessionListEntry) -> Self {
         let memory_bytes = entry.runtime_memory_bytes();
+        let tree_memory_bytes = entry.runtime_tree_memory_bytes();
         let saved_session = entry.saved_session;
 
         Self {
@@ -110,6 +114,7 @@ impl DashboardRow {
             full_directory: saved_session.directory,
             opencode_session_id: saved_session.opencode_session_id,
             memory_bytes,
+            tree_memory_bytes,
             status: entry.status,
         }
     }
@@ -131,6 +136,13 @@ impl DashboardRow {
 
     pub fn memory_label(&self) -> String {
         match self.memory_bytes {
+            Some(bytes) => format_memory(bytes),
+            None => String::from("-"),
+        }
+    }
+
+    pub fn tree_memory_label(&self) -> String {
+        match self.tree_memory_bytes {
             Some(bytes) => format_memory(bytes),
             None => String::from("-"),
         }

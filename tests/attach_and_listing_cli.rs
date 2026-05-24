@@ -753,6 +753,8 @@ fn list_json_uses_public_status_values_and_null_session_ids() {
         .expect("saved session should be present");
     assert_eq!(saved["status"], "saved");
     assert_eq!(saved["session_id"], Value::Null);
+    assert!(saved["memory_bytes"].is_null());
+    assert!(saved["tree_memory_bytes"].is_null());
 
     let detached = sessions
         .iter()
@@ -760,6 +762,8 @@ fn list_json_uses_public_status_values_and_null_session_ids() {
         .expect("detached session should be present");
     assert_eq!(detached["status"], "detached");
     assert_eq!(detached["session_id"], detached_id);
+    assert!(detached["memory_bytes"].is_number());
+    assert!(detached["tree_memory_bytes"].is_number());
 
     let attached = sessions
         .iter()
@@ -767,6 +771,8 @@ fn list_json_uses_public_status_values_and_null_session_ids() {
         .expect("attached session should be present");
     assert_eq!(attached["status"], "attached");
     assert_eq!(attached["session_id"], attached_id);
+    assert!(attached["memory_bytes"].is_number());
+    assert!(attached["tree_memory_bytes"].is_number());
 
     detach_tmux_client_from_session(&attached_session_name);
     let status = attached_client

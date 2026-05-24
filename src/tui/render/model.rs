@@ -504,16 +504,22 @@ fn column_widths_for_rows<'a>(
         status: display_width("detached")
             .max(display_width(&totals.filtered_running.to_string()))
             .max(display_width("STATUS")),
-        memory: display_width("523 MiB")
+        proc_memory: display_width("523 MiB")
             .max(display_width(&format_memory(totals.filtered_memory_bytes)))
-            .max(display_width("MEMORY")),
+            .max(display_width("PROC")),
+        tree_memory: display_width("523 MiB")
+            .max(display_width(&format_memory(totals.filtered_tree_memory_bytes)))
+            .max(display_width("TREE")),
     };
 
     for row in rows {
         widths.id = widths.id.max(display_width(&row.session_id.to_string()));
         widths.name = widths.name.max(display_width(&row.name));
         widths.status = widths.status.max(display_width(row.status_label()));
-        widths.memory = widths.memory.max(display_width(&row.memory_label()));
+        widths.proc_memory = widths.proc_memory.max(display_width(&row.memory_label()));
+        widths.tree_memory = widths
+            .tree_memory
+            .max(display_width(&row.tree_memory_label()));
     }
 
     widths
@@ -531,6 +537,11 @@ fn summary_totals(snapshot: &DashboardSnapshot) -> DashboardSummary {
             .iter()
             .map(|row| row.memory_bytes.unwrap_or(0))
             .sum(),
+        filtered_tree_memory_bytes: snapshot
+            .rows
+            .iter()
+            .map(|row| row.tree_memory_bytes.unwrap_or(0))
+            .sum(),
     }
 }
 
@@ -540,7 +551,8 @@ fn unfiltered_session_content_width(snapshot: &DashboardSnapshot, widths: &Colum
         "ID",
         "NAME",
         "STATUS",
-        "MEMORY",
+        "PROC",
+        "TREE",
         "DIRECTORY",
         widths,
     )) as u16;
@@ -553,6 +565,7 @@ fn unfiltered_session_content_width(snapshot: &DashboardSnapshot, widths: &Colum
                 &row.name,
                 row.status_label(),
                 &row.memory_label(),
+                &row.tree_memory_label(),
                 &row.directory,
                 widths,
             )) as u16
@@ -564,6 +577,7 @@ fn unfiltered_session_content_width(snapshot: &DashboardSnapshot, widths: &Colum
         "total sessions",
         &totals.filtered_running.to_string(),
         &format_memory(totals.filtered_memory_bytes),
+        &format_memory(totals.filtered_tree_memory_bytes),
         "all sessions",
         widths,
     )) as u16;
@@ -585,7 +599,7 @@ fn session_rows(
     content_width: usize,
     theme: &Theme,
 ) -> SessionTableRows {
-    let header_text = format_column_row("ID", "NAME", "STATUS", "MEMORY", "DIRECTORY", widths);
+    let header_text = format_column_row("ID", "NAME", "STATUS", "PROC", "TREE", "DIRECTORY", widths);
     let header = RowSpec::single(
         header_text,
         Style::default()
@@ -618,6 +632,7 @@ fn session_rows(
                 "total sessions",
                 &state.view.totals.filtered_running.to_string(),
                 &format_memory(state.view.totals.filtered_memory_bytes),
+                &format_memory(state.view.totals.filtered_tree_memory_bytes),
                 state.totals_scope_label(),
                 widths,
             ),
@@ -655,6 +670,7 @@ fn append_group_rows(
                 &row.name,
                 row.status_label(),
                 &row.memory_label(),
+                &row.tree_memory_label(),
                 &row.directory,
                 widths,
             ),

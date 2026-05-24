@@ -7,6 +7,8 @@ pub struct SessionListRow {
     pub directory: String,
     pub session_id: Option<String>,
     pub saved_id: i64,
+    pub memory_bytes: Option<u64>,
+    pub tree_memory_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +22,8 @@ struct ColumnWidths {
 
 impl SessionListRow {
     fn from_entry(entry: SessionListEntry) -> Self {
+        let memory_bytes = entry.runtime_memory_bytes();
+        let tree_memory_bytes = entry.runtime_tree_memory_bytes();
         let saved_session = entry.saved_session;
 
         Self {
@@ -28,6 +32,8 @@ impl SessionListRow {
             directory: saved_session.directory.display().to_string(),
             session_id: saved_session.opencode_session_id,
             saved_id: saved_session.id,
+            memory_bytes,
+            tree_memory_bytes,
         }
     }
 
@@ -84,6 +90,8 @@ pub fn render_json(rows: &[SessionListRow]) -> String {
                 "directory": row.directory,
                 "session_id": row.session_id,
                 "id": row.saved_id,
+                "memory_bytes": row.memory_bytes,
+                "tree_memory_bytes": row.tree_memory_bytes,
             })
         })
         .collect::<Vec<_>>();

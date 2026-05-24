@@ -38,7 +38,8 @@ pub fn format_column_row(
     id: &str,
     name: &str,
     status: &str,
-    memory: &str,
+    proc_memory: &str,
+    tree_memory: &str,
     directory: &str,
     widths: &ColumnWidths,
 ) -> String {
@@ -49,7 +50,9 @@ pub fn format_column_row(
         String::from("  "),
         pad_to_display_width(status, widths.status),
         String::from("  "),
-        pad_to_display_width(memory, widths.memory),
+        pad_to_display_width(proc_memory, widths.proc_memory),
+        String::from("  "),
+        pad_to_display_width(tree_memory, widths.tree_memory),
         String::from("  "),
         String::from(directory),
     ]
@@ -103,7 +106,8 @@ pub struct ColumnWidths {
     pub id: usize,
     pub name: usize,
     pub status: usize,
-    pub memory: usize,
+    pub proc_memory: usize,
+    pub tree_memory: usize,
 }
 
 fn basename(path: &Path) -> Option<String> {

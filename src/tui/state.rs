@@ -173,6 +173,7 @@ impl DashboardState {
                     filtered_sessions: 0,
                     filtered_running: 0,
                     filtered_memory_bytes: 0,
+                    filtered_tree_memory_bytes: 0,
                 },
             },
             selected_index: 0,

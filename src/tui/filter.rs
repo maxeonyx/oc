@@ -47,6 +47,7 @@ pub fn totals_for_rows<'a>(
     totals.filtered_sessions = 0;
     totals.filtered_running = 0;
     totals.filtered_memory_bytes = 0;
+    totals.filtered_tree_memory_bytes = 0;
 
     for row in rows {
         totals.filtered_sessions += 1;
@@ -54,6 +55,7 @@ pub fn totals_for_rows<'a>(
             totals.filtered_running += 1;
         }
         totals.filtered_memory_bytes += row.memory_bytes.unwrap_or(0);
+        totals.filtered_tree_memory_bytes += row.tree_memory_bytes.unwrap_or(0);
     }
 
     totals
