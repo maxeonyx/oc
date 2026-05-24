@@ -94,7 +94,7 @@ impl RenderModel {
             action_states: action_states(state),
             help_row: help_row(&state.theme),
             input_cursor_offset: input_cursor_offset(state),
-            show_cursor: should_show_cursor(state),
+            show_cursor: should_show_cursor(state.input_mode),
         }
     }
 
@@ -768,9 +768,21 @@ fn input_cursor_offset(state: &DashboardState) -> u16 {
     (display_width(prefix) + display_width(&state.input_text)) as u16
 }
 
-fn should_show_cursor(state: &DashboardState) -> bool {
-    matches!(state.input_mode, InputMode::Command)
-        || (matches!(state.input_mode, InputMode::Filter) && !state.input_text.is_empty())
+fn should_show_cursor(input_mode: InputMode) -> bool {
+    matches!(input_mode, InputMode::Command) || matches!(input_mode, InputMode::Filter)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn filter_mode_always_shows_cursor() {
+        todo!("pending TDD ratchet commit for filter cursor visibility");
+    }
+
+    #[test]
+    fn command_mode_shows_cursor() {
+        todo!("pending TDD ratchet commit for command cursor visibility regression guard");
+    }
 }
 
 fn centered_text(label: &str, width: usize) -> String {

@@ -1017,6 +1017,11 @@ fn restart_uses_captured_session_id_when_only_process_session_support_exists() {
 }
 
 #[test]
+fn launch_captures_root_session_id_when_process_session_points_at_subagent() {
+    todo!("pending TDD ratchet commit for root session capture via process_session parent chain");
+}
+
+#[test]
 fn concurrent_same_directory_sessions_capture_distinct_ids_by_pid() {
     let env = TestEnv::new("concurrent-same-dir-captures-distinct-ids-by-pid");
     let fake_opencode = env.install_fake_opencode();

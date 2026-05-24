@@ -180,7 +180,10 @@ impl OpenCodeDb {
         }
 
         Ok(ProcessSessionLookup::Available(match row.session_id {
-            Some(session_id) => ProcessSessionRowLookup::SessionId(session_id),
+            Some(session_id) => {
+                let session_id = resolve_root_session_id(&connection, &self.path, &session_id)?;
+                ProcessSessionRowLookup::SessionId(session_id)
+            }
             None => ProcessSessionRowLookup::SessionIdMissing,
         }))
     }
@@ -254,6 +257,58 @@ fn query_process_session_table_lookup(
     }
 }
 
+fn resolve_root_session_id(connection: &Connection, path: &Path, session_id: &str) -> Result<String> {
+    let original_session_id = session_id.to_string();
+    let mut current_session_id = original_session_id.clone();
+    let mut first_lookup = true;
+
+    loop {
+        match connection.query_row(
+            "SELECT parent_id FROM session WHERE id = ?1",
+            params![&current_session_id],
+            |row| row.get::<_, Option<String>>(0),
+        ) {
+            Ok(Some(parent_id)) => {
+                current_session_id = parent_id;
+                first_lookup = false;
+            }
+            Ok(None) => return Ok(current_session_id),
+            Err(rusqlite::Error::QueryReturnedNoRows) if first_lookup => {
+                return Ok(original_session_id);
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Err(anyhow!(
+                    "OpenCode session parent chain is broken at '{}'",
+                    current_session_id
+                ))
+                .with_context(|| {
+                    format!(
+                        "failed to resolve OpenCode root session ID from {}",
+                        path.display()
+                    )
+                });
+            }
+            Err(error) if is_missing_session_table_error(&error) => return Ok(original_session_id),
+            Err(error) if is_unavailable_error(&error) => {
+                return Err(anyhow!(error)).with_context(|| {
+                    format!(
+                        "failed to resolve OpenCode root session ID from {}",
+                        path.display()
+                    )
+                });
+            }
+            Err(error) => {
+                return Err(anyhow!(error)).with_context(|| {
+                    format!(
+                        "failed to resolve OpenCode root session ID from {}",
+                        path.display()
+                    )
+                });
+            }
+        }
+    }
+}
+
 fn process_start_ticks_match(pid: u32, expected_ticks: u64) -> Result<bool> {
     let stat_path = PathBuf::from(format!("/proc/{pid}/stat"));
     let contents = match fs::read_to_string(&stat_path) {
@@ -283,4 +338,17 @@ fn is_unavailable_error(error: &rusqlite::Error) -> bool {
 
 fn is_missing_session_table_error(error: &rusqlite::Error) -> bool {
     matches!(error, rusqlite::Error::SqliteFailure(_, Some(message)) if message.contains("no such table: session"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn resolve_root_session_id_returns_root_for_nested_subagent_session() {
+        todo!("pending TDD ratchet commit for nested root session resolution");
+    }
+
+    #[test]
+    fn resolve_root_session_id_preserves_unknown_session_id() {
+        todo!("pending TDD ratchet commit for unknown session id passthrough");
+    }
 }
