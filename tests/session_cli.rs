@@ -2,9 +2,9 @@ mod common;
 
 use common::{
     FakeOpenCode, SavedSessionRow, TestEnv, detach_tmux_client_from_session,
-    insert_opencode_session, read_opencode_process_sessions, read_opencode_sessions, read_saved_sessions,
-    tmux_session_attached_count, update_saved_session_last_used_at, wait_for_file_contains,
-    wait_for_file_exists, wait_for_file_to_contain_parseable_u32,
+    insert_opencode_session, read_opencode_process_sessions, read_opencode_sessions,
+    read_saved_sessions, tmux_session_attached_count, update_saved_session_last_used_at,
+    wait_for_file_contains, wait_for_file_exists, wait_for_file_to_contain_parseable_u32,
     wait_for_file_to_have_non_empty_contents, wait_for_opencode_process_session,
     wait_for_opencode_process_session_absent, wait_for_opencode_process_session_state,
     wait_for_tmux_pane_current_command_to_contain, wait_for_tmux_pane_pid_to_be_non_zero,
@@ -1076,7 +1076,10 @@ fn launch_captures_root_session_id_when_process_session_points_at_subagent() {
         .find(|row| row.name == "dc")
         .expect("saved row should exist");
 
-    assert_eq!(saved_row.opencode_session_id.as_deref(), Some(root_session_id.as_str()));
+    assert_eq!(
+        saved_row.opencode_session_id.as_deref(),
+        Some(root_session_id.as_str())
+    );
 }
 
 #[test]

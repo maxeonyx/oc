@@ -508,7 +508,9 @@ fn column_widths_for_rows<'a>(
             .max(display_width(&format_memory(totals.filtered_memory_bytes)))
             .max(display_width("PROC")),
         tree_memory: display_width("523 MiB")
-            .max(display_width(&format_memory(totals.filtered_tree_memory_bytes)))
+            .max(display_width(&format_memory(
+                totals.filtered_tree_memory_bytes,
+            )))
             .max(display_width("TREE")),
     };
 
@@ -599,7 +601,8 @@ fn session_rows(
     content_width: usize,
     theme: &Theme,
 ) -> SessionTableRows {
-    let header_text = format_column_row("ID", "NAME", "STATUS", "PROC", "TREE", "DIRECTORY", widths);
+    let header_text =
+        format_column_row("ID", "NAME", "STATUS", "PROC", "TREE", "DIRECTORY", widths);
     let header = RowSpec::single(
         header_text,
         Style::default()
