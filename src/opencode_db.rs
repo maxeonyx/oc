@@ -257,7 +257,11 @@ fn query_process_session_table_lookup(
     }
 }
 
-fn resolve_root_session_id(connection: &Connection, path: &Path, session_id: &str) -> Result<String> {
+fn resolve_root_session_id(
+    connection: &Connection,
+    path: &Path,
+    session_id: &str,
+) -> Result<String> {
     let original_session_id = session_id.to_string();
     let mut current_session_id = original_session_id.clone();
     let mut first_lookup = true;

@@ -448,7 +448,10 @@ fn read_process_children(proc_root: &Path) -> Result<HashMap<u32, Vec<u32>>> {
         .with_context(|| format!("failed to list proc directory {}", proc_root.display()))?
     {
         let entry = entry.with_context(|| {
-            format!("failed to read entry in proc directory {}", proc_root.display())
+            format!(
+                "failed to read entry in proc directory {}",
+                proc_root.display()
+            )
         })?;
         let Some(pid) = entry
             .file_name()
