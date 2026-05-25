@@ -282,8 +282,7 @@ fn resolve_root_session_id(
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 return Err(anyhow!(
-                    "OpenCode session parent chain is broken at '{}'",
-                    current_session_id
+                    "OpenCode session parent chain is broken at '{current_session_id}'"
                 ))
                 .with_context(|| {
                     format!(
