@@ -33,6 +33,8 @@ For manual visual inspection, set `OC_THEME=light` or `OC_THEME=dark` when termi
 
 TDD is enforced via `cargo ratchet` (the `tdd-ratchet` crate). CI runs `cargo ratchet` instead of `cargo test` directly.
 
+**Before committing, always run `cargo fmt` and `cargo clippy -- -D warnings`.** CI checks both — formatting diffs and clippy warnings are CI failures. If `clippy` isn't available in the local toolchain, at minimum run `cargo fmt`.
+
 ### Tmux session cleanup
 
 Tests and fixture scripts create real tmux sessions. **Agents must verify no leaked tmux sessions remain after test runs or fixture use.** After running `cargo ratchet` or the test fixture script, check for leftover sessions with `tmux ls` and kill any that match the test/fixture prefix. The `TestEnv` harness handles cleanup for tests, but if a test crashes or an agent interrupts a run, sessions can leak.
