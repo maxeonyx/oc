@@ -120,6 +120,7 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
         RequestedAction::AttachTarget { target } => service.activate_target(&target),
         RequestedAction::Default => tui::run_dashboard(service),
         RequestedAction::DumpSessionList => run_dump_session_list(service),
+        RequestedAction::DumpSessionDebug => run_dump_session_debug(service),
         RequestedAction::DumpRuntimeConfig => {
             service.config().write_debug_dump();
             Ok(())
@@ -133,6 +134,22 @@ fn should_attach_session() -> bool {
 }
 
 fn run_dump_session_list(service: &SessionService) -> Result<()> {
+    service.reconcile_missing_session_ids_once()?;
+    let mut names = service
+        .list_dashboard_sessions()?
+        .into_iter()
+        .map(|session| session.saved_session.name)
+        .collect::<Vec<_>>();
+    names.sort();
+
+    for name in names {
+        println!("{name}");
+    }
+
+    Ok(())
+}
+
+fn run_dump_session_debug(service: &SessionService) -> Result<()> {
     service.reconcile_missing_session_ids_once()?;
     for session in service.list_dashboard_sessions()? {
         println!("{}", session.debug_dump_line());

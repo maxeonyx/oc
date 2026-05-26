@@ -1,5 +1,5 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
-use clap_complete::{Generator, Shell};
+use clap_complete::Shell;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
@@ -43,6 +43,7 @@ pub enum RequestedAction {
     },
     DbPath,
     DumpSessionList,
+    DumpSessionDebug,
     DumpRuntimeConfig,
     ParseMemoryStatus {
         path: PathBuf,
@@ -108,6 +109,7 @@ impl Cli {
             (Some(Command::List { json }), None) => RequestedAction::List { json },
             (Some(Command::DbPath), None) => RequestedAction::DbPath,
             (Some(Command::DumpSessionList), None) => RequestedAction::DumpSessionList,
+            (Some(Command::DumpSessionDebug), None) => RequestedAction::DumpSessionDebug,
             (Some(Command::DumpRuntimeConfig), None) => RequestedAction::DumpRuntimeConfig,
             (Some(Command::ParseMemoryStatus { path }), None) => {
                 RequestedAction::ParseMemoryStatus { path }
@@ -122,59 +124,123 @@ impl Cli {
 }
 
 pub fn print_completion(shell: CompletionShell) {
-    let mut command = Cli::command();
-    let bin_name = command.get_name().to_string();
-    let generator: Shell = shell.into();
-    let mut output = Vec::new();
-    generate(generator, &mut command, bin_name, &mut output);
-
     if shell == CompletionShell::Fish {
-        let output = String::from_utf8(output).expect("generated fish completion should be utf-8");
-        let output = sanitize_fish_completion(output);
         io::stdout()
-            .write_all(output.as_bytes())
+            .write_all(fish_completion_script().as_bytes())
             .expect("failed to write fish completion");
     } else {
+        let mut command = Cli::command();
+        let bin_name = command.get_name().to_string();
+        let generator: Shell = shell.into();
+        let mut output = Vec::new();
+        clap_complete::generate(generator, &mut command, bin_name, &mut output);
+
         io::stdout()
             .write_all(&output)
             .expect("failed to write completion");
     }
 }
 
-fn sanitize_fish_completion(output: String) -> String {
-    const HIDDEN_SUBCOMMANDS: [&str; 3] = [
-        "__dump-session-list",
-        "__dump-runtime-config",
-        "__parse-memory-status",
-    ];
+fn fish_completion_script() -> &'static str {
+    r#"complete -c oc -f
 
-    output
-        .lines()
-        .filter(|line| {
-            !HIDDEN_SUBCOMMANDS.iter().any(|subcommand| {
-                line.contains(&format!("-a \"{subcommand}\""))
-                    || line.contains(&format!("__fish_oc_using_subcommand {subcommand}"))
-            })
-        })
-        .map(|line| {
-            HIDDEN_SUBCOMMANDS
-                .iter()
-                .fold(line.to_string(), |line, subcommand| {
-                    line.replace(&format!(" {subcommand}"), "")
-                })
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n"
-}
+function __fish_oc_global_optspecs
+    string join \n h/help V/version
+end
 
-fn generate(
-    generator: impl Generator,
-    command: &mut clap::Command,
-    bin_name: String,
-    output: &mut dyn io::Write,
-) {
-    clap_complete::generate(generator, command, bin_name, output);
+function __fish_oc_needs_command
+    set -l cmd (commandline -opc)
+    set -e cmd[1]
+    argparse -s (__fish_oc_global_optspecs) -- $cmd 2>/dev/null
+    or return
+    if set -q argv[1]
+        echo $argv[1]
+        return 1
+    end
+    return 0
+end
+
+function __fish_oc_using_subcommand
+    set -l cmd (__fish_oc_needs_command)
+    test -z "$cmd"
+    and return 1
+    contains -- $cmd[1] $argv
+end
+
+function __fish_oc_session_names
+    command oc __dump-session-list 2>/dev/null
+end
+
+complete -c oc -n '__fish_oc_needs_command' -s h -l help -d 'Print help'
+complete -c oc -n '__fish_oc_needs_command' -s V -l version -d 'Print version'
+complete -c oc -n '__fish_oc_needs_command' -k -a "(__fish_oc_session_names)"
+complete -c oc -n '__fish_oc_needs_command' -k -a '
+alias\tCreate an alias for a directory
+completion\tGenerate shell completion scripts
+d\tRemove a session from the database
+db-path\tPrint the database path
+delete\tRemove a session from the database
+help\tPrint this message or the help of the given subcommand(s)
+migrate\tMigrate legacy aliases into the database
+mv\tMove a session to a new directory
+n\tCreate a new OpenCode session
+new\tCreate a new OpenCode session
+restart\tRestart a session
+rm\tRemove a session from the database
+stop\tStop a running session
+unalias\tRemove a saved directory alias'
+
+complete -c oc -n '__fish_oc_using_subcommand alias' -s h -l help -d 'Print help'
+complete -c oc -n '__fish_oc_using_subcommand alias; and __fish_is_nth_token 3' -r -a '(__fish_complete_directories)'
+
+complete -c oc -n '__fish_oc_using_subcommand completion' -s h -l help -d 'Print help'
+complete -c oc -n '__fish_oc_using_subcommand completion; and __fish_is_nth_token 2' -a '
+bash\tBash
+fish\tFish
+zsh\tZsh'
+
+complete -c oc -n '__fish_oc_using_subcommand d delete rm' -s h -l help -d 'Print help'
+complete -c oc -n '__fish_oc_using_subcommand d delete rm; and __fish_is_nth_token 2' -a "(__fish_oc_session_names)"
+
+complete -c oc -n '__fish_oc_using_subcommand db-path' -s h -l help -d 'Print help'
+
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a '
+alias\tCreate an alias for a directory
+completion\tGenerate shell completion scripts
+d\tRemove a session from the database
+db-path\tPrint the database path
+delete\tRemove a session from the database
+help\tPrint this message or the help of the given subcommand(s)
+migrate\tMigrate legacy aliases into the database
+mv\tMove a session to a new directory
+n\tCreate a new OpenCode session
+new\tCreate a new OpenCode session
+restart\tRestart a session
+rm\tRemove a session from the database
+stop\tStop a running session
+unalias\tRemove a saved directory alias'
+
+complete -c oc -n '__fish_oc_using_subcommand list' -l json -d 'Render tracked sessions as JSON'
+complete -c oc -n '__fish_oc_using_subcommand list' -s h -l help -d 'Print help'
+
+complete -c oc -n '__fish_oc_using_subcommand migrate' -s h -l help -d 'Print help'
+
+complete -c oc -n '__fish_oc_using_subcommand mv' -s h -l help -d 'Print help'
+complete -c oc -n '__fish_oc_using_subcommand mv; and __fish_is_nth_token 2' -a "(__fish_oc_session_names)"
+complete -c oc -n '__fish_oc_using_subcommand mv; and __fish_is_nth_token 3' -r -a '(__fish_complete_directories)'
+
+complete -c oc -n '__fish_oc_using_subcommand n new' -s h -l help -d 'Print help'
+complete -c oc -n '__fish_oc_using_subcommand n new; and __fish_is_nth_token 3' -r -a '(__fish_complete_directories)'
+
+complete -c oc -n '__fish_oc_using_subcommand restart' -s h -l help -d 'Print help'
+complete -c oc -n '__fish_oc_using_subcommand restart; and __fish_is_nth_token 2' -a "(__fish_oc_session_names)"
+
+complete -c oc -n '__fish_oc_using_subcommand stop' -s h -l help -d 'Print help'
+complete -c oc -n '__fish_oc_using_subcommand stop; and __fish_is_nth_token 2' -a "(__fish_oc_session_names)"
+
+complete -c oc -n '__fish_oc_using_subcommand unalias' -s h -l help -d 'Print help'
+complete -c oc -n '__fish_oc_using_subcommand unalias; and __fish_is_nth_token 2' -a "(__fish_oc_session_names)"
+"#
 }
 
 #[derive(Debug, Subcommand)]
@@ -235,6 +301,8 @@ pub enum Command {
     DbPath,
     #[command(name = "__dump-session-list", hide = true)]
     DumpSessionList,
+    #[command(name = "__dump-session-debug", hide = true)]
+    DumpSessionDebug,
     #[command(name = "__dump-runtime-config", hide = true)]
     DumpRuntimeConfig,
     #[command(name = "__parse-memory-status", hide = true)]

@@ -24,7 +24,7 @@ fn managed_tmux_session_name(env: &TestEnv, name: &str) -> String {
 fn dump_session_lines(env: &TestEnv) -> Vec<String> {
     String::from_utf8(
         env.oc_cmd()
-            .args(["__dump-session-list"])
+            .args(["__dump-session-debug"])
             .assert()
             .success()
             .get_output()
@@ -443,7 +443,7 @@ fn no_arg_auto_attach_skips_home_directory_even_with_single_match() {
     env.oc_cmd()
         .env("HOME", &fake_home)
         .current_dir(&fake_home)
-        .args(["__dump-session-list"])
+        .args(["__dump-session-debug"])
         .assert()
         .success()
         .stdout(
@@ -579,7 +579,7 @@ fn new_session_falls_back_to_dashboard_when_attach_fails() {
 
 fn assert_hidden_session_dump_status(env: &TestEnv, expected_status: &str) {
     env.oc_cmd()
-        .args(["__dump-session-list"])
+        .args(["__dump-session-debug"])
         .assert()
         .success()
         .stdout(predicate::str::contains(format!(
