@@ -174,51 +174,50 @@ end
 complete -c oc -n '__fish_oc_needs_command' -s h -l help -d 'Print help'
 complete -c oc -n '__fish_oc_needs_command' -s V -l version -d 'Print version'
 complete -c oc -n '__fish_oc_needs_command' -k -a "(__fish_oc_session_names)"
-complete -c oc -n '__fish_oc_needs_command' -k -a '
-alias\tCreate an alias for a directory
-completion\tGenerate shell completion scripts
-d\tRemove a session from the database
-db-path\tPrint the database path
-delete\tRemove a session from the database
-help\tPrint this message or the help of the given subcommand(s)
-migrate\tMigrate legacy aliases into the database
-mv\tMove a session to a new directory
-n\tCreate a new OpenCode session
-new\tCreate a new OpenCode session
-restart\tRestart a session
-rm\tRemove a session from the database
-stop\tStop a running session
-unalias\tRemove a saved directory alias'
+complete -c oc -n '__fish_oc_needs_command' -k -a alias -d 'Create an alias for a directory'
+complete -c oc -n '__fish_oc_needs_command' -k -a completion -d 'Generate shell completion scripts'
+complete -c oc -n '__fish_oc_needs_command' -k -a d -d 'Remove a session from the database'
+complete -c oc -n '__fish_oc_needs_command' -k -a db-path -d 'Print the database path'
+complete -c oc -n '__fish_oc_needs_command' -k -a delete -d 'Remove a session from the database'
+complete -c oc -n '__fish_oc_needs_command' -k -a help -d 'Print this message or the help of the given subcommand(s)'
+complete -c oc -n '__fish_oc_needs_command' -k -a list -d 'List sessions'
+complete -c oc -n '__fish_oc_needs_command' -k -a migrate -d 'Migrate legacy aliases into the database'
+complete -c oc -n '__fish_oc_needs_command' -k -a mv -d 'Move a session to a new directory'
+complete -c oc -n '__fish_oc_needs_command' -k -a n -d 'Create a new OpenCode session'
+complete -c oc -n '__fish_oc_needs_command' -k -a new -d 'Create a new OpenCode session'
+complete -c oc -n '__fish_oc_needs_command' -k -a restart -d 'Restart a session'
+complete -c oc -n '__fish_oc_needs_command' -k -a rm -d 'Remove a session from the database'
+complete -c oc -n '__fish_oc_needs_command' -k -a stop -d 'Stop a running session'
+complete -c oc -n '__fish_oc_needs_command' -k -a unalias -d 'Remove a saved directory alias'
 
 complete -c oc -n '__fish_oc_using_subcommand alias' -s h -l help -d 'Print help'
 complete -c oc -n '__fish_oc_using_subcommand alias; and __fish_is_nth_token 3' -r -a '(__fish_complete_directories)'
 
 complete -c oc -n '__fish_oc_using_subcommand completion' -s h -l help -d 'Print help'
-complete -c oc -n '__fish_oc_using_subcommand completion; and __fish_is_nth_token 2' -a '
-bash\tBash
-fish\tFish
-zsh\tZsh'
+complete -c oc -n '__fish_oc_using_subcommand completion; and __fish_is_nth_token 2' -a bash -d 'Bash'
+complete -c oc -n '__fish_oc_using_subcommand completion; and __fish_is_nth_token 2' -a fish -d 'Fish'
+complete -c oc -n '__fish_oc_using_subcommand completion; and __fish_is_nth_token 2' -a zsh -d 'Zsh'
 
 complete -c oc -n '__fish_oc_using_subcommand d delete rm' -s h -l help -d 'Print help'
 complete -c oc -n '__fish_oc_using_subcommand d delete rm; and __fish_is_nth_token 2' -a "(__fish_oc_session_names)"
 
 complete -c oc -n '__fish_oc_using_subcommand db-path' -s h -l help -d 'Print help'
 
-complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a '
-alias\tCreate an alias for a directory
-completion\tGenerate shell completion scripts
-d\tRemove a session from the database
-db-path\tPrint the database path
-delete\tRemove a session from the database
-help\tPrint this message or the help of the given subcommand(s)
-migrate\tMigrate legacy aliases into the database
-mv\tMove a session to a new directory
-n\tCreate a new OpenCode session
-new\tCreate a new OpenCode session
-restart\tRestart a session
-rm\tRemove a session from the database
-stop\tStop a running session
-unalias\tRemove a saved directory alias'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a alias -d 'Create an alias for a directory'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a completion -d 'Generate shell completion scripts'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a d -d 'Remove a session from the database'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a db-path -d 'Print the database path'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a delete -d 'Remove a session from the database'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a help -d 'Print this message or the help of the given subcommand(s)'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a list -d 'List sessions'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a migrate -d 'Migrate legacy aliases into the database'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a mv -d 'Move a session to a new directory'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a n -d 'Create a new OpenCode session'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a new -d 'Create a new OpenCode session'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a restart -d 'Restart a session'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a rm -d 'Remove a session from the database'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a stop -d 'Stop a running session'
+complete -c oc -n '__fish_oc_using_subcommand help; and __fish_is_nth_token 2' -a unalias -d 'Remove a saved directory alias'
 
 complete -c oc -n '__fish_oc_using_subcommand list' -l json -d 'Render tracked sessions as JSON'
 complete -c oc -n '__fish_oc_using_subcommand list' -s h -l help -d 'Print help'

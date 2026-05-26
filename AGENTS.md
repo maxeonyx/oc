@@ -71,8 +71,8 @@ The repo pins Rust via `rust-toolchain.toml`; CI should use that same toolchain.
 **User testing before publishing:** Do NOT push to main (which triggers a release) until the user has tested the binary. The workflow is:
 
 1. Build locally (`cargo build --release`)
-2. Give the user the binary path (`./target/release/oc`) for manual testing
-3. Install any supporting files the user would need to test (e.g. `oc completion fish > ~/.config/fish/completions/oc.fish`) — don't make the user do mechanical setup steps
+2. Install any supporting files the user would need to test (e.g. `oc completion fish > ~/.config/fish/completions/oc.fish`) — don't make the user do mechanical setup steps
+3. Create a clean test fixture in an isolated environment and give the user a single command to copy-paste that exercises the feature. The user should not have to figure out how to test — the agent provides the exact invocation.
 4. Wait for user confirmation that it works
 5. Only then: bump version, commit, push (which publishes the release)
 
