@@ -68,6 +68,15 @@ The repo pins Rust via `rust-toolchain.toml`; CI should use that same toolchain.
 
 **After pushing, agents must monitor CI** (`gh run list --limit 1`) and confirm the pipeline passes. If CI fails, fix it before moving on.
 
+**User testing before publishing:** Do NOT push to main (which triggers a release) until the user has tested the binary. The workflow is:
+
+1. Build locally (`cargo build --release`)
+2. Give the user the binary path (`./target/release/oc`) for manual testing
+3. Wait for user confirmation that it works
+4. Only then: bump version, commit, push (which publishes the release)
+
+If a push has already happened for non-user-facing changes (test fixes, formatting, docs), that's fine. But user-facing features must be tested before the push that releases them.
+
 **Installing locally:** Do not use `cargo install`. Download the released binary from GitHub to `~/.local/bin/`:
 
 ```bash
