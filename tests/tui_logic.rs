@@ -52,8 +52,8 @@ fn filter_groups_by_priority_then_match_strength() {
             "session:16",
             "session:31",
             "group:name",
-            "session:43",
             "session:54",
+            "session:43",
             "totals:6:0",
         ],
     );

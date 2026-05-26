@@ -145,7 +145,7 @@ fn append_group(
         return;
     }
 
-    matches.sort_by_key(|(strength, row)| (*strength, row.session_id));
+    matches.sort_by_key(|(strength, _row)| *strength);
     groups.push(DashboardGroup {
         title: Some(String::from(group.title())),
         sessions: matches.into_iter().map(|(_, row)| row).collect(),
