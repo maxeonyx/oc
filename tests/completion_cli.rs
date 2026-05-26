@@ -56,7 +56,7 @@ fn completion_fish_uses_hand_written_top_level_ordering() {
         .find("complete -c oc -n '__fish_oc_needs_command' -k -a \"(__fish_oc_session_names)\"")
         .expect("session completion should exist");
     let subcommands_pos = output
-        .find("complete -c oc -n '__fish_oc_needs_command' -k -a '")
+        .find("complete -c oc -n '__fish_oc_needs_command' -k -a alias -d")
         .expect("subcommand completion should exist");
     assert!(
         sessions_pos < subcommands_pos,
