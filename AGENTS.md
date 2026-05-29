@@ -2,7 +2,7 @@
 
 Interactive TUI session manager for OpenCode. Manages tmux sessions named `oc-<name>`.
 
-Part of the [maxeonyx agent-tools](https://tools.maxeonyx.com) family (alongside trunc, tmux-bridge, dotsync, tdd-ratchet). Follow the `agent-tools` skill for repo conventions.
+Part of the [maxeonyx agent-tools](https://tools.maxeonyx.com) family (alongside trunc, tmux-bridge, dotsync, tdd-ratchet). This tool is developed from the [agent-tools workspace](https://github.com/maxeonyx/agent-tools); clone and develop there, not from this repo directly. Follow the `agent-tools` skill for repo conventions.
 
 ## Requirements
 

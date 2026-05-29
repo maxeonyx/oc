@@ -8,6 +8,7 @@ repository = "https://github.com/maxeonyx/oc"
 readme = "README.md"
 
 [dependencies]
+agent-tools-updater = { path = "../../crates/agent-tools-updater" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
