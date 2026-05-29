@@ -50,6 +50,7 @@
     "oc::harness_foundation$test_env_drop_cleans_up_tmux_sessions": "passing",
     "oc::harness_foundation$test_env_injects_runtime_overrides_into_oc": "passing",
     "oc::harness_foundation$wait_for_file_contains_observes_eventual_file_content": "passing",
+    "oc::help_examples$help_examples": "pending",
     "oc::migration_and_memory$hidden_memory_parser_reads_proc_status_kib": "passing",
     "oc::migration_and_memory$migrate_imports_old_aliases_file_idempotently": "passing",
     "oc::migration_and_memory$migrate_preserves_legacy_directory_and_session_fields": "passing",
