@@ -3,6 +3,10 @@ use clap_complete::Shell;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
+const ROOT_LONG_ABOUT: &str = "Interactive TUI session manager for OpenCode\n\n[TARGET] is a session name or alias to attach to.\n\nWorkflow:\n  Use bare `oc` to open the TUI session manager.\n  Use `oc <name>` to attach to a tracked session.";
+
+const ROOT_EXAMPLES: &str = "Examples:\n  $ oc                           # Open the TUI session manager\n  $ oc my-project                # Attach to session 'my-project'\n  $ oc new my-project ~/src/foo  # Create a new session\n  $ oc list                      # List all tracked sessions\n  $ oc list --json               # List as JSON (for scripting)";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestedAction {
     Completion {
@@ -54,13 +58,15 @@ pub enum RequestedAction {
 #[command(
     name = "oc",
     version,
-    about = "Interactive TUI session manager for OpenCode"
+    about = "Interactive TUI session manager for OpenCode",
+    long_about = ROOT_LONG_ABOUT,
+    after_help = ROOT_EXAMPLES
 )]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    #[arg(value_hint = ValueHint::Other)]
+    #[arg(help = "Session name or alias to attach to", value_hint = ValueHint::Other)]
     pub target: Option<String>,
 }
 
@@ -245,55 +251,64 @@ complete -c oc -n '__fish_oc_using_subcommand unalias; and __fish_is_nth_token 2
 #[derive(Debug, Subcommand)]
 pub enum Command {
     #[command(about = "Generate shell completion scripts")]
-    Completion { shell: CompletionShell },
+    Completion {
+        #[arg(help = "Shell to generate completions for")]
+        shell: CompletionShell,
+    },
     #[command(visible_alias = "n", about = "Create a new OpenCode session")]
     New {
-        #[arg(value_hint = ValueHint::Other)]
+        #[arg(help = "Session name", value_hint = ValueHint::Other)]
         name: String,
-        #[arg(value_hint = ValueHint::DirPath)]
+        #[arg(
+            help = "Working directory (defaults to current)",
+            value_hint = ValueHint::DirPath
+        )]
         dir: Option<PathBuf>,
-        #[arg(last = true)]
+        #[arg(help = "Additional arguments passed to OpenCode", last = true)]
         launch_args: Vec<String>,
     },
     #[command(about = "Create an alias for a directory")]
     Alias {
-        #[arg(value_hint = ValueHint::Other)]
+        #[arg(help = "Alias name", value_hint = ValueHint::Other)]
         name: String,
-        #[arg(value_hint = ValueHint::DirPath)]
+        #[arg(
+            help = "Working directory (defaults to current)",
+            value_hint = ValueHint::DirPath
+        )]
         dir: Option<PathBuf>,
     },
     #[command(about = "Remove a saved directory alias")]
     Unalias {
-        #[arg(value_hint = ValueHint::Other)]
+        #[arg(help = "Alias name to remove", value_hint = ValueHint::Other)]
         name: String,
     },
     #[command(name = "rm", visible_aliases = ["delete", "d"], about = "Remove a session from the database")]
     Rm {
-        #[arg(value_hint = ValueHint::Other)]
+        #[arg(help = "Session name or alias to remove", value_hint = ValueHint::Other)]
         target: String,
     },
     #[command(about = "Stop a running session")]
     Stop {
-        #[arg(value_hint = ValueHint::Other)]
+        #[arg(help = "Session name or alias to stop", value_hint = ValueHint::Other)]
         target: String,
     },
     #[command(about = "Restart a session")]
     Restart {
-        #[arg(value_hint = ValueHint::Other)]
+        #[arg(help = "Session name or alias to restart", value_hint = ValueHint::Other)]
         target: String,
     },
     #[command(name = "mv", about = "Move a session to a new directory")]
     Move {
-        #[arg(value_hint = ValueHint::Other)]
+        #[arg(help = "Session to move", value_hint = ValueHint::Other)]
         target: String,
-        #[arg(value_hint = ValueHint::DirPath)]
+        #[arg(help = "New working directory", value_hint = ValueHint::DirPath)]
         new_dir: PathBuf,
     },
     #[command(about = "Migrate legacy aliases into the database")]
     Migrate,
     #[command(about = "List tracked sessions")]
     List {
-        #[arg(long)]
+        #[arg(help = "Output as JSON for scripting", long)]
         json: bool,
     },
     #[command(name = "db-path", about = "Print the database path")]

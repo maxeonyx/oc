@@ -15,6 +15,8 @@ use std::fs;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+const SESSION_NOT_FOUND_SUGGESTION: &str = "Use `oc list` to see available sessions.";
+
 fn managed_tmux_session_name(env: &TestEnv, name: &str) -> String {
     format!("{}{}", env.tmux_prefix(), name)
 }
@@ -430,7 +432,10 @@ fn rm_fails_cleanly_when_target_not_found() {
         .args(["rm", "does-not-exist"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not found"));
+        .stderr(
+            predicate::str::contains("not found")
+                .and(predicate::str::contains(SESSION_NOT_FOUND_SUGGESTION)),
+        );
 }
 
 #[test]
@@ -517,7 +522,10 @@ fn stop_fails_cleanly_when_target_not_found() {
         .args(["stop", "does-not-exist"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not found"));
+        .stderr(
+            predicate::str::contains("not found")
+                .and(predicate::str::contains(SESSION_NOT_FOUND_SUGGESTION)),
+        );
 }
 
 #[test]

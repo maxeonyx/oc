@@ -10,6 +10,8 @@ use crate::service::SessionService;
 use crate::tmux;
 use crate::tui;
 
+const SESSION_NOT_FOUND_SUGGESTION: &str = "Use `oc list` to see available sessions.";
+
 pub fn run(service: &SessionService, action: RequestedAction) -> Result<()> {
     if matches!(action, RequestedAction::Default) {
         match auto_attach_result(service)? {
@@ -100,8 +102,12 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
         }
         RequestedAction::Alias { name, dir } => service.save_alias(name, dir),
         RequestedAction::Unalias { name } => service.remove_alias(&name),
-        RequestedAction::Rm { target } => service.remove_session(&target),
-        RequestedAction::Stop { target } => service.stop_session(&target),
+        RequestedAction::Rm { target } => service
+            .remove_session(&target)
+            .map_err(|error| add_session_not_found_suggestion(error, &target)),
+        RequestedAction::Stop { target } => service
+            .stop_session(&target)
+            .map_err(|error| add_session_not_found_suggestion(error, &target)),
         RequestedAction::Restart { target } => {
             service.restart_session(&target)?;
             if should_attach_session() {
@@ -127,6 +133,26 @@ pub fn run_requested_action(service: &SessionService, action: RequestedAction) -
         }
         RequestedAction::ParseMemoryStatus { path } => run_parse_memory_status(path),
     }
+}
+
+fn add_session_not_found_suggestion(error: anyhow::Error, target: &str) -> anyhow::Error {
+    if !is_session_resolution_not_found_error(&error, target) {
+        return error;
+    }
+
+    error.context(SESSION_NOT_FOUND_SUGGESTION)
+}
+
+fn is_session_resolution_not_found_error(error: &anyhow::Error, target: &str) -> bool {
+    let expected_messages = [
+        format!("Session {target} not found"),
+        format!("Session alias '{target}' not found"),
+    ];
+
+    error.chain().any(|cause| {
+        let message = cause.to_string();
+        expected_messages.contains(&message)
+    })
 }
 
 fn should_attach_session() -> bool {
