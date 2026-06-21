@@ -35,9 +35,29 @@ TDD is enforced via `cargo ratchet` (the `tdd-ratchet` crate). CI runs `cargo ra
 
 **Before committing, always run `cargo fmt` and `cargo clippy -- -D warnings`.** CI checks both — formatting diffs and clippy warnings are CI failures. If `clippy` isn't available in the local toolchain, at minimum run `cargo fmt`.
 
-### Tmux session cleanup
+### TODO: PTY-dependent tests fail in headless / nested-tmux shells
 
-Tests and fixture scripts create real tmux sessions. **Agents must verify no leaked tmux sessions remain after test runs or fixture use.** After running `cargo ratchet` or the test fixture script, check for leftover sessions with `tmux ls` and kill any that match the test/fixture prefix. The `TestEnv` harness handles cleanup for tests, but if a test crashes or an agent interrupts a run, sessions can leak.
+Some `session_cli` tests (e.g. `stop_accepts_numeric_id`, `stop_sends_ctrl_c_then_ctrl_d_and_keeps_alias`) force the attach path with `OC_FORCE_ATTACH_FOR_TESTS=1`. Attaching enters terminal raw mode, which requires a real controlling PTY. Run from an agent shell that is headless or nested inside tmux, those tests fail with:
+
+```
+Error: failed to enable terminal raw mode: No such device or address (os error 6)
+```
+
+This is an environment limitation, not a code regression and not a tdd-ratchet grandfathering problem — oc's own no-TTY path is correct and separately tested (`new-without-tty-skips-attach`). It is why the workspace `standards` `tdd_ratchet` concern reports oc failures when run from an agent shell.
+
+**TODO — fix the harness so these tests run anywhere (don't just live with it):** the attach-path tests should allocate their own PTY in the test harness (e.g. `openpty`/`forkpty` — oc already does `pty.fork()` in `src/tmux.rs`) so they exercise real attach behavior without depending on the caller's terminal. Until then they only pass in a real interactive terminal / CI with a PTY. Do NOT "fix" this by changing oc product behavior or re-adopting oc onto a new ratchet baseline — that would mask real failures.
+
+### TODO: test runs leak tmux sessions on crash/interrupt
+
+oc test runs leak tmux sessions (prefix `oc-test-*`) whenever a test crashes, times out, or an agent interrupts the run — common when the PTY-dependent tests above fail partway. The `TestEnv` harness cleans up on the happy path but not when a run is killed mid-flight. This is a recurring, real annoyance.
+
+**TODO — make cleanup crash-proof:** the harness should reap any session matching its scoped prefix even after an aborted/panicking run (e.g. a pre-run sweep of stale `oc-test-*` sessions, and/or a more robust drop/`atexit`-style guard). Until that's fixed, manually sweep after ANY `cargo ratchet` / `cargo nextest` / fixture run:
+
+```bash
+tmux ls 2>/dev/null | grep -oE '^oc-test[^:]*' | while read s; do tmux kill-session -t "$s"; done
+```
+
+Verify none remain with `tmux ls`. A leaked `oc-test-*` session is litter that confuses later runs.
 
 ### E2E test reliability principles
 
