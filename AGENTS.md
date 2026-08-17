@@ -64,17 +64,20 @@ Verify none remain with `tmux ls`. A leaked `oc-test-*` session is litter that c
 These rules make flaky tests structurally impossible. Follow them when writing or modifying tests.
 
 **Fresh evidence per launch:**
+
 - Every launch must produce uniquely attributable evidence. Never accept "file exists" as proof of a fresh launch — verify data tied to the current launch only.
 - If a shared log file is reused across launches, the test must wait for overwrite evidence (content change), not mere presence. Call `reset_logs_for_launch()` before triggering a re-launch.
 - Assertions must prove "this launch happened," not just "a launch happened sometime." Expected args, env, and token should all come from the current test action.
 
 **Synchronize on observable state, never time:**
+
 - No fixed sleeps in test logic. Use polling-based assertions everywhere.
 - Wait for explicit start conditions (e.g. fake process has written its log) before reading logs.
 - Wait for explicit stop conditions (e.g. tmux session gone, pane process exited) before asserting shutdown/restart behavior.
 - "Command returned" does not prove the managed process started, stopped, or restarted. Each step needs its own observable postcondition.
 
 **Isolation and cleanup:**
+
 - All tests must use `TestEnv` — no ad hoc paths or tmux names.
 - Tmux session names are unique per test and scoped by the harness prefix.
 - Cleanup happens before and after each test. A leaked tmux session matching the test prefix is a test failure.
@@ -124,42 +127,53 @@ Pushing to main is safe — it's just remote preservation. Commit and push frequ
 These principles govern the rendering architecture. Code changes to `src/tui/render/` must satisfy all of them. They exist to make entire classes of visual bugs structurally impossible.
 
 **Surface model:**
+
 1. Every screen cell has exactly one owning surface (terminal bg, outer container, or descendant panel). No unpainted gaps.
 2. A panel is a rectangular surface — it paints its ENTIRE rect with its background before rendering content.
 3. Panels nest through content rects — children never paint outside parent's content rect.
 4. Totals, headers, separators belong to their owning panel, not beside it.
 
 **Width consistency:**
+
 5. Every row inside a panel renders to EXACTLY the panel content width — padded with panel bg if shorter, clipped if longer.
 6. This applies to ALL row types: data rows, group headers, separator lines, highlights, totals, empty states, selected rows.
 
 **Interface stability:**
+
 7. Dashboard dimensions (width AND height) are computed from unfiltered data with worst-case group header reservation (4 rows). They change only on terminal resize or data structure changes.
 8. Filtering changes content within a fixed frame — never changes dashboard dimensions.
-8a. Footer rows (totals, status) are pinned to the bottom of their panel. When filtering reduces content, slack space appears above the footer — never below it.
+
+   8a. Footer rows (totals, status) are pinned to the bottom of their panel. When filtering reduces content, slack space appears above the footer — never below it.
 
 **Reactivity:**
+
 9. Render is pure — render ticks never mutate selection, filter results, or layout caches.
 10. Filtered results recompute only when filter text or underlying data changes.
 11. Selection snaps to top result only when filter text changes AND the current selection disappears from results.
 
 **Colors:**
+
 12. Every color resolves to a named theme role → terminal background or ANSI palette. No ad hoc RGB in widget code.
 13. Half-block transitions represent two known adjacent surfaces — fg and bg trace to the two surfaces being separated.
 
 **Padding and containers:**
+
 14. Padding is painted area — padding cells are filled with the panel's background.
 15. The outer container is a real root panel with its own background, padding, content rect, and edges.
 
 **Buttons:**
+
 16. Action buttons share the panel width equally. Width = (available width - gutters) / button count. All buttons same rendered width.
 17. Button state (enabled/disabled/selected) changes style only, never geometry.
 
 **Emphasis:**
+
 18. Structural separators (group headers, separator lines) are surface features. Their color derives from the panel background shifted slightly toward text — much closer to background than to content. Not derived from text or muted-text tokens. Contrast ratio against panel background must not exceed ~1.20; they should be near-invisible background features, not readable labels.
 
 **Aspect ratio:**
+
 19. Terminal cells are ~1:2 (1 wide, 2 tall). Horizontal padding should be 2 columns where vertical padding is 1 row (half-block), to maintain visual consistency.
 
 **Framework usage:**
+
 20. Work WITH ratatui, not around it. Use `frame.set_cursor_position()` for cursor management (ratatui handles show/hide). Don't call raw crossterm cursor commands.
