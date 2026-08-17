@@ -117,6 +117,7 @@ All available actions are shown as **separate items** in the action bar, ordered
 **Action button layout:** Buttons are laid out as a single horizontal group that shares the panel width equally. The action panel has 2-column horizontal padding. The remaining width is divided evenly across all buttons, with fixed gutters between adjacent buttons. Buttons do not shrink-wrap to their label width — all buttons are the same rendered width. When a button is selected/highlighted, it uses a semantic color reflecting the action's nature: Attach = green/blue (positive), RM = red (destructive), Stop = yellow (caution), Restart = yellow (caution). Non-selected active buttons stay neutral. Disabled buttons are grayed out.
 
 **Action availability by session status:**
+
 - **Attached:** Attach (reattach/focus), RM (remove alias + kill), Stop (graceful shutdown, keep alias), Restart (only with saved OpenCode session ID)
 - **Detached:** Attach (attach to running), RM (remove alias + kill), Stop (graceful shutdown, keep alias), Restart (only with saved OpenCode session ID)
 - **Saved:** Attach (launch + attach), RM (delete alias), Stop (unavailable — nothing running), Restart (unavailable)
@@ -133,6 +134,7 @@ A small **key help** line sits at the very bottom of the TUI.
 Every session gets a stable, dense numeric ID assigned from storage. IDs are stable while the session exists but get reused after deletion — the next new session fills the lowest available gap. Session names can't be plain numbers — this keeps names and IDs unambiguous.
 
 Example:
+
 ```
 oc new → 1
 oc new → 2
@@ -154,6 +156,7 @@ Typing filters the session list. Filtering is **case-insensitive**. It matches a
 4. **OpenCode session ID matches** — pasting in a session ID like `ses_44b3d03b...` filters to the right session
 
 Within each group, sort by match quality:
+
 1. Exact match
 2. Prefix match
 3. Contains match
@@ -199,6 +202,7 @@ The TUI should feel like it belongs alongside OpenCode in the same terminal — 
 **Interface stability:** The dashboard's outer dimensions (width AND height) are computed from the unfiltered data and do not change while filtering. Height pre-reserves space for the worst-case filter grouping overhead (4 group-header rows: ID, Name, Directory, Session ID) so that group headers appearing during filtering never grow the dashboard. Applying or clearing a filter changes which rows are populated, but never changes the dashboard's outer dimensions. Background data changes can expand (never shrink) the frozen dimensions. Clearing the filter recomputes fresh from current data. Terminal resize always adapts.
 
 **Layout order (top to bottom):**
+
 1. Input/filter bar
 2. Summary header (counts of attached/detached/saved — reacting to current filter when filtering, showing totals when in command mode or unfiltered)
 3. Session list with column headers + totals row (totals are conceptually part of the sessions panel — separated by a blank line, not a panel border)
@@ -210,12 +214,14 @@ The TUI should feel like it belongs alongside OpenCode in the same terminal — 
 **Padding:** Tight and purposeful. Padding should be visually consistent — if vertical padding is a half-block (one row), horizontal padding should be two columns (since terminal cells are ~1:2 aspect ratio). The tool should feel compact.
 
 **Information hierarchy:** Important information should be prominent; less important information should be subdued. Specifically:
+
 - Column headers should be clearly styled
 - Group headers (when filtering) are **structural separators, not content**. Their color is derived from the **panel background** shifted only slightly toward the text color — visually much closer to the background than to content text. They should be barely noticeable. Full-width, centered text with a horizontal rule line at the same color.
 - Totals row should be visually distinct from sessions but within the same panel
 - The input bar should have a visible cursor
 
 **Other:**
+
 - Dynamic column widths based on content.
 - Directory abbreviation: when the dir basename matches the session name, abbreviate to highlight only what's different.
 - Highlighted row should stand out clearly but not be garish.
