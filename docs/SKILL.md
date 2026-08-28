@@ -1,30 +1,14 @@
 ---
 name: oc
-description: When managing or reattaching long-running OpenCode sessions in tmux
+description: Historical reference for the archived oc OpenCode session manager
 ---
 
 # oc
 
-Use `oc` to view, jump to, and preserve OpenCode sessions in tmux.
+`oc` is archived and no longer recommended for installation or new workflows. OpenCode adopted the session-management capabilities that made it useful.
 
-Prefer `oc` when the goal is session continuity rather than raw tmux control: it keeps the OpenCode-oriented session list, aliases, and relaunch behavior in one place.
+This skill is retained only to explain an existing installation or historical configuration. Do not install or introduce `oc` unless the user explicitly asks to revive the archived project.
 
-## Install
+## Historical behavior
 
-```bash
-curl -Lo ~/.local/bin/oc https://oc.maxeonyx.com/releases/oc-x86_64-linux
-chmod +x ~/.local/bin/oc
-```
-
-Requires: `tmux`
-
-## Usage
-
-```bash
-oc             # Open the interactive dashboard
-oc dc          # Attach to or launch the named session directly
-oc alias dc .  # Save a named session for this directory
-oc rm dc       # Remove the saved session and kill it if running
-```
-
-Sessions live in tmux so they survive SSH disconnects, terminal crashes, and laptop sleep.
+The tool listed saved OpenCode sessions, attached to their tmux sessions, and preserved launch aliases. Source and the final published release remain at <https://github.com/maxeonyx/oc>.
